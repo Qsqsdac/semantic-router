@@ -42,36 +42,6 @@ routing:
         case_sensitive: false
         ngram_threshold: 0.4
         ngram_arity: 3
-  decisions:
-    - name: "urgent-route"
-      description: "Use stronger model for urgent requests"
-      priority: 200
-      rules:
-        operator: "AND"
-        conditions:
-          - type: "keyword"
-            name: "urgent_keywords"
-      modelRefs:
-        - model: "qwen3-32b"
-          use_reasoning: true
-      algorithm:
-        type: "static"
-      plugins:
-        - type: "system_prompt"
-          configuration:
-            enabled: true
-            mode: "insert"
-            system_prompt: "Prioritize concise, actionable steps with clear risk callouts."
-    - name: "default-route"
-      description: "Fallback route"
-      priority: 100
-      rules:
-        operator: "AND"
-        conditions: []
-      modelRefs:
-        - model: "qwen3-8b"
-          use_reasoning: false
-      algorithm:
-        type: "static"
+  decisions: []
 
 global: {}
