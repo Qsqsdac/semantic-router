@@ -27,6 +27,8 @@ import requests
 
 SUPPORTED_DATASET = "TIGER-Lab/MMLU-Pro"
 SUPPORTED_SPLIT = "test"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "reports" / "classification-intent"
 
 
 def parse_args() -> argparse.Namespace:
@@ -62,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-dir",
-        default="reports/classification-intent",
+        default=str(DEFAULT_OUTPUT_DIR),
         help="Directory to save detail/summary files",
     )
     return parser.parse_args()
@@ -287,7 +289,9 @@ def main() -> None:
     )
 
     run_id = time.strftime("%Y%m%d-%H%M%S")
-    out_dir = Path(args.output_dir)
+    out_dir = Path(args.output_dir).expanduser()
+    if not out_dir.is_absolute():
+        out_dir = (REPO_ROOT / out_dir).resolve()
     detail_file = out_dir / f"intent_eval_detail_{run_id}.jsonl"
     summary_file = out_dir / f"intent_eval_summary_{run_id}.json"
     latest_detail = out_dir / "latest_detail.jsonl"
