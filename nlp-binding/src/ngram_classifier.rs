@@ -84,7 +84,12 @@ impl NgramClassifier {
         arity: usize,
     ) {
         self.rules.push(NgramRule::new(
-            name, operator, keywords, threshold, case_sensitive, arity,
+            name,
+            operator,
+            keywords,
+            threshold,
+            case_sensitive,
+            arity,
         ));
     }
 
@@ -113,8 +118,7 @@ impl NgramClassifier {
             let mut matched_set = std::collections::HashSet::new();
 
             for word in &words {
-                let results: Vec<SearchResult> =
-                    rule.corpus.search(word, rule.threshold, 10);
+                let results: Vec<SearchResult> = rule.corpus.search(word, rule.threshold, 10);
 
                 for result in results {
                     let matched_text = result.text.clone();
@@ -135,8 +139,7 @@ impl NgramClassifier {
 
             // Also try matching multi-word phrases against the full text
             if matched_keywords.len() < rule.keywords.len() {
-                let results: Vec<SearchResult> =
-                    rule.corpus.search(&input, rule.threshold, 10);
+                let results: Vec<SearchResult> = rule.corpus.search(&input, rule.threshold, 10);
                 for result in results {
                     let matched_text = result.text.clone();
                     for (idx, kw) in rule.keywords.iter().enumerate() {
@@ -176,7 +179,11 @@ impl NgramClassifier {
                     } else {
                         matched_similarities
                     },
-                    match_count: if rule.operator == "NOR" { 0 } else { match_count },
+                    match_count: if rule.operator == "NOR" {
+                        0
+                    } else {
+                        match_count
+                    },
                     total_keywords: rule.keywords.len(),
                 });
             }

@@ -19,3 +19,27 @@ func TestPreferenceModelConfigWithDefaultsPreservesExplicitFalse(t *testing.T) {
 		t.Fatal("expected explicit false preference config to remain disabled")
 	}
 }
+
+func TestCategoryModelEffectiveIntentMatchModeDefaultsToBERT(t *testing.T) {
+	cfg := CategoryModel{}
+	if got := cfg.EffectiveIntentMatchMode(); got != IntentMatchModeBERT {
+		t.Fatalf("expected default intent mode %q, got %q", IntentMatchModeBERT, got)
+	}
+}
+
+func TestCategoryModelEffectiveIntentMatchModeNormalizesFallbackMode(t *testing.T) {
+	cfg := CategoryModel{IntentMatchMode: " KEYWORD_FALLBACK_BERT "}
+	if got := cfg.EffectiveIntentMatchMode(); got != IntentMatchModeKeywordFallbackBERT {
+		t.Fatalf("expected normalized intent mode %q, got %q", IntentMatchModeKeywordFallbackBERT, got)
+	}
+	if !cfg.UseKeywordFallbackToBERT() {
+		t.Fatal("expected keyword fallback mode to be enabled")
+	}
+}
+
+func TestCategoryModelEffectiveIntentMatchModeFallsBackOnUnknownMode(t *testing.T) {
+	cfg := CategoryModel{IntentMatchMode: "unknown"}
+	if got := cfg.EffectiveIntentMatchMode(); got != IntentMatchModeBERT {
+		t.Fatalf("expected unknown mode to fallback to %q, got %q", IntentMatchModeBERT, got)
+	}
+}

@@ -17,6 +17,18 @@ type MockCategoryInference struct {
 	classifyWithProbsError  error
 }
 
+type MockIntentKeywordMatcher struct {
+	category string
+	matched  bool
+	err      error
+}
+
+func (m *MockIntentKeywordMatcher) Classify(_ string) (string, bool, error) {
+	return m.category, m.matched, m.err
+}
+
+func (m *MockIntentKeywordMatcher) Free() {}
+
 func (m *MockCategoryInference) Classify(_ string) (candle_binding.ClassResult, error) {
 	return m.classifyResult, m.classifyError
 }
@@ -55,6 +67,10 @@ func domainTestConfig() *config.RouterConfig {
 }
 
 func buildDomainClassifier(mock *MockCategoryInference) *Classifier {
+	return buildDomainClassifierWithMatcher(mock, nil)
+}
+
+func buildDomainClassifierWithMatcher(mock *MockCategoryInference, matcher IntentKeywordMatcher) *Classifier {
 	return &Classifier{
 		Config: domainTestConfig(),
 		CategoryMapping: &CategoryMapping{
@@ -71,7 +87,8 @@ func buildDomainClassifier(mock *MockCategoryInference) *Classifier {
 				"10": "other", "11": "philosophy", "12": "physics", "13": "psychology",
 			},
 		},
-		categoryInference: mock,
+		categoryInference:    mock,
+		intentKeywordMatcher: matcher,
 	}
 }
 
@@ -194,5 +211,39 @@ var _ = Describe("Domain signal: complete classification failure", func() {
 		for k := range results.SignalConfidences {
 			Expect(k).NotTo(HavePrefix("domain:"))
 		}
+	})
+})
+
+var _ = Describe("Domain signal: keyword fallback mode", func() {
+	It("should short-circuit to keyword category when matched", func() {
+		mock := &MockCategoryInference{
+			classifyWithProbsError: errors.New("should not be called"),
+		}
+		matcher := &MockIntentKeywordMatcher{category: "economics", matched: true}
+
+		classifier := buildDomainClassifierWithMatcher(mock, matcher)
+		classifier.Config.CategoryModel.IntentMatchMode = config.IntentMatchModeKeywordFallbackBERT
+
+		results := classifier.EvaluateAllSignals("latest stock market movements")
+
+		Expect(results.MatchedDomainRules).To(ContainElement("economics"))
+		Expect(results.SignalConfidences).To(HaveKeyWithValue("domain:economics", BeNumerically("==", 1.0)))
+	})
+
+	It("should fall back to BERT path when keyword matcher misses", func() {
+		mock := &MockCategoryInference{
+			classifyWithProbsResult: candle_binding.ClassResultWithProbs{
+				Class: 4, Confidence: 0.83,
+			},
+		}
+		matcher := &MockIntentKeywordMatcher{matched: false}
+
+		classifier := buildDomainClassifierWithMatcher(mock, matcher)
+		classifier.Config.CategoryModel.IntentMatchMode = config.IntentMatchModeKeywordFallbackBERT
+
+		results := classifier.EvaluateAllSignals("supply demand and market shocks")
+
+		Expect(results.MatchedDomainRules).To(ContainElement("economics"))
+		Expect(results.SignalConfidences).To(HaveKey("domain:economics"))
 	})
 })

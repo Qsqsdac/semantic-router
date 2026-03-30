@@ -1396,6 +1396,9 @@ global:
           use_mmbert_32k: true
           category_mapping_path: models/mmbert32k-intent-classifier-merged/category_mapping.json
           fallback_category: other
+          intent_match_mode: bert
+          intent_keyword_mapping_path: models/mmbert32k-intent-classifier-merged/intent_keyword_mapping.json
+          intent_keyword_case_sensitive: false
         mcp:
           enabled: true
           transport_type: stdio

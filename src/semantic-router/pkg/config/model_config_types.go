@@ -1,5 +1,12 @@
 package config
 
+import "strings"
+
+const (
+	IntentMatchModeBERT                = "bert"
+	IntentMatchModeKeywordFallbackBERT = "keyword_fallback_bert"
+)
+
 // Classifier represents the configuration for text classification.
 type Classifier struct {
 	CategoryModel    `yaml:"category_model"`
@@ -15,13 +22,31 @@ type BertModel struct {
 }
 
 type CategoryModel struct {
-	ModelID             string  `yaml:"model_id"`
-	Threshold           float32 `yaml:"threshold"`
-	UseCPU              bool    `yaml:"use_cpu"`
-	UseModernBERT       bool    `yaml:"use_modernbert"`
-	UseMmBERT32K        bool    `yaml:"use_mmbert_32k"`
-	CategoryMappingPath string  `yaml:"category_mapping_path"`
-	FallbackCategory    string  `yaml:"fallback_category,omitempty"`
+	ModelID                    string  `yaml:"model_id"`
+	Threshold                  float32 `yaml:"threshold"`
+	UseCPU                     bool    `yaml:"use_cpu"`
+	UseModernBERT              bool    `yaml:"use_modernbert"`
+	UseMmBERT32K               bool    `yaml:"use_mmbert_32k"`
+	CategoryMappingPath        string  `yaml:"category_mapping_path"`
+	FallbackCategory           string  `yaml:"fallback_category,omitempty"`
+	IntentMatchMode            string  `yaml:"intent_match_mode,omitempty"`
+	IntentKeywordMappingPath   string  `yaml:"intent_keyword_mapping_path,omitempty"`
+	IntentKeywordCaseSensitive bool    `yaml:"intent_keyword_case_sensitive,omitempty"`
+}
+
+func (m CategoryModel) EffectiveIntentMatchMode() string {
+	mode := strings.ToLower(strings.TrimSpace(m.IntentMatchMode))
+	if mode == "" {
+		return IntentMatchModeBERT
+	}
+	if mode == IntentMatchModeKeywordFallbackBERT {
+		return IntentMatchModeKeywordFallbackBERT
+	}
+	return IntentMatchModeBERT
+}
+
+func (m CategoryModel) UseKeywordFallbackToBERT() bool {
+	return m.EffectiveIntentMatchMode() == IntentMatchModeKeywordFallbackBERT
 }
 
 type PIIModel struct {

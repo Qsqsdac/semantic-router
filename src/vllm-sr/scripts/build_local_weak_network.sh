@@ -11,6 +11,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${ROOT_DIR}/../.." && pwd)"
 
 TMP_DOCKERFILE="/tmp/Dockerfile.vllm-sr.local"
 IMAGE="ghcr.io/vllm-project/semantic-router/vllm-sr:latest"
@@ -48,15 +49,16 @@ sed -i 's/^[[:space:]]*ca-certificates[[:space:]]*\\$/        ca-certificates; \
 # Remove heavyweight optional deps for weak-network local runtime builds.
 sed -i '/COPY bench\/ \/app\/bench\//d' "${TMP_DOCKERFILE}"
 sed -i '/COPY src\/training\/model_eval\//d' "${TMP_DOCKERFILE}"
-perl -0777 -i -pe 's#pip install \$PIP_EXTRA --no-cache-dir -r requirements.txt &&\s*pip install \$PIP_EXTRA --no-cache-dir -r /app/bench/requirements.txt &&\s*pip install \$PIP_EXTRA --no-cache-dir -r /app/src/training/model_eval/requirements.txt#pip install $PIP_EXTRA --no-cache-dir -r requirements.txt#g' "${TMP_DOCKERFILE}"
-perl -0777 -i -pe 's#pip install \$PIP_EXTRA --no-cache-dir -r requirements.txt &&\s*pip install \$PIP_EXTRA --no-cache-dir -r /app/bench/requirements.txt#pip install $PIP_EXTRA --no-cache-dir -r requirements.txt#g' "${TMP_DOCKERFILE}"
+sed -i '/\/app\/bench\/requirements.txt/d' "${TMP_DOCKERFILE}"
+sed -i '/\/app\/src\/training\/model_eval\/requirements.txt/d' "${TMP_DOCKERFILE}"
+sed -i 's#pip install \$PIP_EXTRA --no-cache-dir -r requirements.txt && \\#pip install \$PIP_EXTRA --no-cache-dir -r requirements.txt#' "${TMP_DOCKERFILE}"
 
 echo "[2/5] Stop duplicate builds (if any)"
 pkill -f "docker build .*${IMAGE}.*${TMP_DOCKERFILE}" || true
 pkill -f "docker-buildx buildx build .*${IMAGE}.*${TMP_DOCKERFILE}" || true
 
 echo "[3/5] Build local image: ${IMAGE}"
-cd "${ROOT_DIR}/.."
+cd "${REPO_ROOT}"
 docker build --network host --progress=plain -t "${IMAGE}" -f "${TMP_DOCKERFILE}" .
 
 echo "[4/5] Verify image exists"

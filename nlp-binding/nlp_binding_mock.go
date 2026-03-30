@@ -65,3 +65,28 @@ func (c *NgramClassifier) Classify(text string) MatchResult {
 
 // Free releases resources (mock - no-op).
 func (c *NgramClassifier) Free() {}
+
+// ---------------------------------------------------------------------------
+// Aho-Corasick Classifier (mock)
+// ---------------------------------------------------------------------------
+
+// AhoClassifier wraps a Rust-backed Aho-Corasick classifier.
+type AhoClassifier struct{}
+
+// NewAhoClassifier creates a new Aho-Corasick classifier instance (mock).
+func NewAhoClassifier() *AhoClassifier {
+	return &AhoClassifier{}
+}
+
+// AddRule adds a category-to-keywords rule (mock - no-op).
+func (c *AhoClassifier) AddRule(name string, keywords []string, caseSensitive bool) error {
+	return fmt.Errorf("nlp-binding: Aho classifier not available (built without CGo)")
+}
+
+// Classify runs classification (mock - always returns no match).
+func (c *AhoClassifier) Classify(text string) MatchResult {
+	return MatchResult{}
+}
+
+// Free releases resources (mock - no-op).
+func (c *AhoClassifier) Free() {}

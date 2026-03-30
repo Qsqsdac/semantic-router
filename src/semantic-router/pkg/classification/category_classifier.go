@@ -102,3 +102,14 @@ func (c *Classifier) translateMMLUToGeneric(mmluCategory string) string {
 	}
 	return mmluCategory
 }
+
+func (c *Classifier) normalizeDomainCategory(category string) string {
+	trimmed := strings.TrimSpace(category)
+	if trimmed == "" {
+		return ""
+	}
+	if _, ok := c.GenericToMMLU[trimmed]; ok {
+		return trimmed
+	}
+	return c.translateMMLUToGeneric(trimmed)
+}

@@ -63,6 +63,18 @@ extern bool ngram_classifier_add_rule(
 extern ClassifyResult ngram_classifier_classify(uint64_t handle, const char* text);
 extern void ngram_classifier_free(uint64_t handle);
 
+// Aho-Corasick classifier FFI
+extern uint64_t aho_classifier_new();
+extern bool aho_classifier_add_rule(
+	uint64_t handle,
+	const char* name,
+	const char** keywords,
+	int num_keywords,
+	bool case_sensitive
+);
+extern ClassifyResult aho_classifier_classify(uint64_t handle, const char* text);
+extern void aho_classifier_free(uint64_t handle);
+
 // Memory management
 extern void free_classify_result(ClassifyResult result);
 */
@@ -224,6 +236,67 @@ func (c *NgramClassifier) Classify(text string) MatchResult {
 // Free releases the Rust-side resources for this classifier.
 func (c *NgramClassifier) Free() {
 	C.ngram_classifier_free(c.handle)
+}
+
+// ---------------------------------------------------------------------------
+// Aho-Corasick Classifier
+// ---------------------------------------------------------------------------
+
+// AhoClassifier wraps a Rust-backed Aho-Corasick keyword classifier.
+type AhoClassifier struct {
+	handle C.uint64_t
+}
+
+// NewAhoClassifier creates a new Aho-Corasick classifier instance.
+func NewAhoClassifier() *AhoClassifier {
+	handle := C.aho_classifier_new()
+	return &AhoClassifier{handle: handle}
+}
+
+// AddRule adds a category-to-keywords rule to the Aho-Corasick classifier.
+func (c *AhoClassifier) AddRule(name string, keywords []string, caseSensitive bool) error {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	cKeywords := make([]*C.char, len(keywords))
+	for i, kw := range keywords {
+		cKeywords[i] = C.CString(kw)
+		defer C.free(unsafe.Pointer(cKeywords[i]))
+	}
+
+	var kwPtr **C.char
+	if len(cKeywords) > 0 {
+		kwPtr = &cKeywords[0]
+	}
+
+	ok := C.aho_classifier_add_rule(
+		c.handle,
+		cName,
+		kwPtr,
+		C.int(len(keywords)),
+		C.bool(caseSensitive),
+	)
+
+	if !bool(ok) {
+		return fmt.Errorf("failed to add Aho-Corasick rule %q", name)
+	}
+	return nil
+}
+
+// Classify runs Aho-Corasick classification on the input text.
+func (c *AhoClassifier) Classify(text string) MatchResult {
+	cText := C.CString(text)
+	defer C.free(unsafe.Pointer(cText))
+
+	result := C.aho_classifier_classify(c.handle, cText)
+	defer C.free_classify_result(result)
+
+	return convertResult(result)
+}
+
+// Free releases the Rust-side resources for this classifier.
+func (c *AhoClassifier) Free() {
+	C.aho_classifier_free(c.handle)
 }
 
 // ---------------------------------------------------------------------------

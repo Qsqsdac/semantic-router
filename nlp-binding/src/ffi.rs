@@ -11,6 +11,7 @@ use std::os::raw::c_char;
 use std::ptr;
 use std::sync::Mutex;
 
+use crate::aho_classifier::AhoClassifier;
 use crate::bm25_classifier::Bm25Classifier;
 use crate::ngram_classifier::NgramClassifier;
 
@@ -23,6 +24,8 @@ static BM25_CLASSIFIERS: OnceLock<Mutex<std::collections::HashMap<u64, Bm25Class
     OnceLock::new();
 static NGRAM_CLASSIFIERS: OnceLock<Mutex<std::collections::HashMap<u64, NgramClassifier>>> =
     OnceLock::new();
+static AHO_CLASSIFIERS: OnceLock<Mutex<std::collections::HashMap<u64, AhoClassifier>>> =
+    OnceLock::new();
 
 fn bm25_map() -> &'static Mutex<std::collections::HashMap<u64, Bm25Classifier>> {
     BM25_CLASSIFIERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
@@ -30,6 +33,10 @@ fn bm25_map() -> &'static Mutex<std::collections::HashMap<u64, Bm25Classifier>> 
 
 fn ngram_map() -> &'static Mutex<std::collections::HashMap<u64, NgramClassifier>> {
     NGRAM_CLASSIFIERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn aho_map() -> &'static Mutex<std::collections::HashMap<u64, AhoClassifier>> {
+    AHO_CLASSIFIERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -156,10 +163,7 @@ pub extern "C" fn bm25_classifier_add_rule(
 
 /// Classify text using a BM25 classifier.
 #[no_mangle]
-pub extern "C" fn bm25_classifier_classify(
-    handle: u64,
-    text: *const c_char,
-) -> ClassifyResult {
+pub extern "C" fn bm25_classifier_classify(handle: u64, text: *const c_char) -> ClassifyResult {
     let text = match unsafe { from_c_str(text) } {
         Some(s) => s,
         None => return ClassifyResult::empty(),
@@ -198,8 +202,7 @@ pub extern "C" fn bm25_classifier_classify(
 
             // Allocate scores array
             let scores_ptr = if count > 0 {
-                let ptr =
-                    unsafe { libc::malloc(count * std::mem::size_of::<f32>()) as *mut f32 };
+                let ptr = unsafe { libc::malloc(count * std::mem::size_of::<f32>()) as *mut f32 };
                 if !ptr.is_null() {
                     unsafe {
                         std::ptr::copy_nonoverlapping(result.scores.as_ptr(), ptr, count);
@@ -305,10 +308,7 @@ pub extern "C" fn ngram_classifier_add_rule(
 
 /// Classify text using an N-gram classifier.
 #[no_mangle]
-pub extern "C" fn ngram_classifier_classify(
-    handle: u64,
-    text: *const c_char,
-) -> ClassifyResult {
+pub extern "C" fn ngram_classifier_classify(handle: u64, text: *const c_char) -> ClassifyResult {
     let text = match unsafe { from_c_str(text) } {
         Some(s) => s,
         None => return ClassifyResult::empty(),
@@ -345,15 +345,10 @@ pub extern "C" fn ngram_classifier_classify(
             };
 
             let scores_ptr = if count > 0 {
-                let ptr =
-                    unsafe { libc::malloc(count * std::mem::size_of::<f32>()) as *mut f32 };
+                let ptr = unsafe { libc::malloc(count * std::mem::size_of::<f32>()) as *mut f32 };
                 if !ptr.is_null() {
                     unsafe {
-                        std::ptr::copy_nonoverlapping(
-                            result.similarities.as_ptr(),
-                            ptr,
-                            count,
-                        );
+                        std::ptr::copy_nonoverlapping(result.similarities.as_ptr(), ptr, count);
                     }
                 }
                 ptr
@@ -378,6 +373,132 @@ pub extern "C" fn ngram_classifier_classify(
 #[no_mangle]
 pub extern "C" fn ngram_classifier_free(handle: u64) {
     ngram_map().lock().unwrap().remove(&handle);
+}
+
+// ===========================================================================
+// Aho-Corasick Classifier FFI
+// ===========================================================================
+
+/// Create a new Aho-Corasick classifier instance. Returns a handle (>0) or 0 on error.
+#[no_mangle]
+pub extern "C" fn aho_classifier_new() -> u64 {
+    let id = next_id();
+    let classifier = AhoClassifier::new();
+    aho_map().lock().unwrap().insert(id, classifier);
+    id
+}
+
+/// Add a rule to an Aho-Corasick classifier.
+///
+/// # Arguments
+/// * `handle` - Classifier handle from `aho_classifier_new`.
+/// * `name` - Rule name (C string).
+/// * `keywords` - Array of keyword C strings.
+/// * `num_keywords` - Length of the keywords array.
+/// * `case_sensitive` - Whether matching is case-sensitive.
+#[no_mangle]
+pub extern "C" fn aho_classifier_add_rule(
+    handle: u64,
+    name: *const c_char,
+    keywords: *const *const c_char,
+    num_keywords: i32,
+    case_sensitive: bool,
+) -> bool {
+    let name = match unsafe { from_c_str(name) } {
+        Some(s) => s.to_string(),
+        None => return false,
+    };
+
+    if keywords.is_null() || num_keywords <= 0 {
+        return false;
+    }
+
+    let kw_slice = unsafe { std::slice::from_raw_parts(keywords, num_keywords as usize) };
+    let kw_vec: Vec<String> = kw_slice
+        .iter()
+        .filter_map(|&ptr| unsafe { from_c_str(ptr) }.map(|s| s.to_string()))
+        .collect();
+
+    if kw_vec.is_empty() {
+        return false;
+    }
+
+    let mut map = aho_map().lock().unwrap();
+    if let Some(classifier) = map.get_mut(&handle) {
+        classifier.add_rule(name, kw_vec, case_sensitive);
+        true
+    } else {
+        false
+    }
+}
+
+/// Classify text using an Aho-Corasick classifier.
+#[no_mangle]
+pub extern "C" fn aho_classifier_classify(handle: u64, text: *const c_char) -> ClassifyResult {
+    let text = match unsafe { from_c_str(text) } {
+        Some(s) => s,
+        None => return ClassifyResult::empty(),
+    };
+
+    let map = aho_map().lock().unwrap();
+    let classifier = match map.get(&handle) {
+        Some(c) => c,
+        None => return ClassifyResult::empty(),
+    };
+
+    match classifier.classify(text) {
+        Some(result) => {
+            let count = result.matched_keywords.len();
+
+            let kw_ptrs: Vec<*mut c_char> = result
+                .matched_keywords
+                .iter()
+                .map(|kw| to_c_string(kw))
+                .collect();
+
+            let kw_array = if count > 0 {
+                let ptr = unsafe {
+                    libc::malloc(count * std::mem::size_of::<*mut c_char>()) as *mut *mut c_char
+                };
+                if !ptr.is_null() {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(kw_ptrs.as_ptr(), ptr, count);
+                    }
+                }
+                ptr
+            } else {
+                ptr::null_mut()
+            };
+
+            let scores_ptr = if count > 0 {
+                let ptr = unsafe { libc::malloc(count * std::mem::size_of::<f32>()) as *mut f32 };
+                if !ptr.is_null() {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(result.scores.as_ptr(), ptr, count);
+                    }
+                }
+                ptr
+            } else {
+                ptr::null_mut()
+            };
+
+            ClassifyResult {
+                matched: true,
+                rule_name: to_c_string(&result.rule_name),
+                matched_keywords: kw_array,
+                scores: scores_ptr,
+                match_count: result.match_count as i32,
+                total_keywords: result.total_keywords as i32,
+            }
+        }
+        None => ClassifyResult::empty(),
+    }
+}
+
+/// Destroy an Aho-Corasick classifier and free its resources.
+#[no_mangle]
+pub extern "C" fn aho_classifier_free(handle: u64) {
+    aho_map().lock().unwrap().remove(&handle);
 }
 
 // ===========================================================================

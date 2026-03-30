@@ -422,6 +422,7 @@ dependencies = [
 name = "nlp-binding"
 version = "0.1.0"
 dependencies = [
+ "aho-corasick",
  "bm25",
  "criterion",
  "libc",

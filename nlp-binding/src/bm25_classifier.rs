@@ -36,8 +36,8 @@ impl Bm25Rule {
             })
             .collect();
 
-        let engine = SearchEngineBuilder::<usize>::with_documents(Language::English, documents)
-            .build();
+        let engine =
+            SearchEngineBuilder::<usize>::with_documents(Language::English, documents).build();
 
         Bm25Rule {
             name,
@@ -78,7 +78,11 @@ impl Bm25Classifier {
         case_sensitive: bool,
     ) {
         self.rules.push(Bm25Rule::new(
-            name, operator, keywords, threshold, case_sensitive,
+            name,
+            operator,
+            keywords,
+            threshold,
+            case_sensitive,
         ));
     }
 
@@ -92,8 +96,7 @@ impl Bm25Classifier {
             };
 
             // Search for all keywords (limit = total keywords)
-            let results: Vec<SearchResult<usize>> =
-                rule.engine.search(&query, rule.keywords.len());
+            let results: Vec<SearchResult<usize>> = rule.engine.search(&query, rule.keywords.len());
 
             // Collect keywords that score above threshold
             let mut matched_keywords = Vec::new();

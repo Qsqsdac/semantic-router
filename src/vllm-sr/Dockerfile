@@ -335,6 +335,7 @@ RUN mkdir -p /app /app/models /app/config /etc/envoy /var/log/supervisor /var/lo
 WORKDIR /app
 COPY src/vllm-sr/cli/ /app/cli/
 COPY src/vllm-sr/requirements.txt /app/requirements.txt
+COPY src/vllm-sr/intent_keyword_mapping.json /app/intent_keyword_mapping.json
 
 # Copy tools database to config directory
 COPY src/vllm-sr/cli/templates/tools_db.json /app/config/tools_db.json

@@ -370,6 +370,7 @@ type Classifier struct {
 	// Dependencies - In-tree classifiers
 	categoryInitializer         CategoryInitializer
 	categoryInference           CategoryInference
+	intentKeywordMatcher        IntentKeywordMatcher
 	jailbreakInitializer        JailbreakInitializer
 	jailbreakInference          JailbreakInference
 	piiInitializer              PIIInitializer
@@ -430,6 +431,12 @@ func withCategory(categoryMapping *CategoryMapping, categoryInitializer Category
 		c.CategoryMapping = categoryMapping
 		c.categoryInitializer = categoryInitializer
 		c.categoryInference = categoryInference
+	}
+}
+
+func withIntentKeywordMatcher(matcher IntentKeywordMatcher) option {
+	return func(c *Classifier) {
+		c.intentKeywordMatcher = matcher
 	}
 }
 
@@ -754,6 +761,22 @@ func NewClassifier(cfg *config.RouterConfig, categoryMapping *CategoryMapping, p
 			categoryInference = createCategoryInference()
 		}
 		options = append(options, withCategory(categoryMapping, categoryInitializer, categoryInference))
+
+		if cfg.CategoryModel.UseKeywordFallbackToBERT() {
+			if cfg.CategoryModel.IntentKeywordMappingPath == "" {
+				return nil, fmt.Errorf("classifier.category_model.intent_keyword_mapping_path is required when intent_match_mode=%q", config.IntentMatchModeKeywordFallbackBERT)
+			}
+
+			matcher, err := NewAhoIntentKeywordMatcher(
+				cfg.CategoryModel.IntentKeywordMappingPath,
+				cfg.CategoryModel.IntentKeywordCaseSensitive,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to initialize intent keyword matcher: %w", err)
+			}
+			options = append(options, withIntentKeywordMatcher(matcher))
+			logging.Infof("Intent keyword fast-path enabled (mode=%s)", cfg.CategoryModel.EffectiveIntentMatchMode())
+		}
 	}
 
 	// Add MCP classifier if configured
@@ -1363,11 +1386,39 @@ func (c *Classifier) EvaluateAllSignalsWithContext(text string, contextText stri
 		go func() {
 			defer wg.Done()
 			start := time.Now()
-			domainResult, err := c.categoryInference.ClassifyWithProbabilities(textForSignal(config.SignalTypeDomain))
+			text := textForSignal(config.SignalTypeDomain)
+
+			if c.intentKeywordMatcher != nil && c.Config.CategoryModel.UseKeywordFallbackToBERT() {
+				matchedCategory, matched, matchErr := c.intentKeywordMatcher.Classify(text)
+				if matchErr != nil {
+					logging.Warnf("[Signal Computation] Intent keyword fast-path failed, falling back to BERT: %v", matchErr)
+				} else if matched {
+					elapsed := time.Since(start)
+					latencySeconds := elapsed.Seconds()
+					categoryName := c.normalizeDomainCategory(matchedCategory)
+
+					metrics.RecordSignalExtraction(config.SignalTypeDomain, categoryName, latencySeconds)
+					results.Metrics.Domain.ExecutionTimeMs = float64(elapsed.Microseconds()) / 1000.0
+					results.Metrics.Domain.Confidence = 1.0
+
+					if categoryName != "" {
+						mu.Lock()
+						metrics.RecordSignalMatch(config.SignalTypeDomain, categoryName)
+						results.MatchedDomainRules = append(results.MatchedDomainRules, categoryName)
+						results.SignalConfidences["domain:"+categoryName] = 1.0
+						mu.Unlock()
+					}
+
+					logging.Infof("[Signal Computation] Domain signal matched via keyword fast-path in %v (category=%s)", elapsed, categoryName)
+					return
+				}
+			}
+
+			domainResult, err := c.categoryInference.ClassifyWithProbabilities(text)
 			if err != nil {
 				// Fall back to Classify() (top-1 only) when ClassifyWithProbabilities is unavailable.
 				logging.Infof("[Signal Computation] ClassifyWithProbabilities unavailable, falling back to Classify: %v", err)
-				basicResult, basicErr := c.categoryInference.Classify(textForSignal(config.SignalTypeDomain))
+				basicResult, basicErr := c.categoryInference.Classify(text)
 				if basicErr != nil {
 					err = basicErr
 				} else {
@@ -2213,6 +2264,20 @@ func (c *Classifier) classifyModalityHybrid(text string, cfg *config.ModalityDet
 
 // ClassifyCategoryWithEntropy performs category classification with entropy-based reasoning decision
 func (c *Classifier) ClassifyCategoryWithEntropy(text string) (string, float64, entropy.ReasoningDecision, error) {
+	if c.intentKeywordMatcher != nil && c.Config.CategoryModel.UseKeywordFallbackToBERT() {
+		matchedCategory, matched, err := c.intentKeywordMatcher.Classify(text)
+		if err != nil {
+			logging.Warnf("intent keyword fast-path failed, falling back to model inference: %v", err)
+		} else if matched {
+			category := c.normalizeDomainCategory(matchedCategory)
+			if category != "" {
+				reasoningDecision := c.makeReasoningDecisionForKeywordCategory(category)
+				logging.Infof("Intent category matched via keyword fast-path: category=%s", category)
+				return category, 1.0, reasoningDecision, nil
+			}
+		}
+	}
+
 	// Try keyword classifier first
 	if c.keywordClassifier != nil {
 		category, confidence, err := c.keywordClassifier.Classify(text)
