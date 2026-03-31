@@ -50,5 +50,5 @@ global:
       classifier:
         domain:
           intent_match_mode: keyword_fallback_bert
-          intent_keyword_mapping_path: /app/intent_keyword_mapping.json
+          intent_keyword_mapping_path: /app/intent-assets/intent_keyword_mapping.json
           intent_keyword_case_sensitive: false
