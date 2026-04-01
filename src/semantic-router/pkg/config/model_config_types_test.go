@@ -37,6 +37,16 @@ func TestCategoryModelEffectiveIntentMatchModeNormalizesFallbackMode(t *testing.
 	}
 }
 
+func TestCategoryModelEffectiveIntentMatchModeNormalizesFastTextMode(t *testing.T) {
+	cfg := CategoryModel{IntentMatchMode: " FASTTEXT_FALLBACK_BERT "}
+	if got := cfg.EffectiveIntentMatchMode(); got != IntentMatchModeFastTextFallbackBERT {
+		t.Fatalf("expected normalized intent mode %q, got %q", IntentMatchModeFastTextFallbackBERT, got)
+	}
+	if !cfg.UseFastTextFallbackToBERT() {
+		t.Fatal("expected fastText fallback mode to be enabled")
+	}
+}
+
 func TestCategoryModelEffectiveIntentMatchModeFallsBackOnUnknownMode(t *testing.T) {
 	cfg := CategoryModel{IntentMatchMode: "unknown"}
 	if got := cfg.EffectiveIntentMatchMode(); got != IntentMatchModeBERT {

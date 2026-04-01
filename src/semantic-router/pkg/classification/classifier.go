@@ -371,6 +371,7 @@ type Classifier struct {
 	categoryInitializer         CategoryInitializer
 	categoryInference           CategoryInference
 	intentKeywordMatcher        IntentKeywordMatcher
+	intentFastTextClassifier    IntentFastTextClassifier
 	jailbreakInitializer        JailbreakInitializer
 	jailbreakInference          JailbreakInference
 	piiInitializer              PIIInitializer
@@ -437,6 +438,12 @@ func withCategory(categoryMapping *CategoryMapping, categoryInitializer Category
 func withIntentKeywordMatcher(matcher IntentKeywordMatcher) option {
 	return func(c *Classifier) {
 		c.intentKeywordMatcher = matcher
+	}
+}
+
+func withIntentFastTextClassifier(classifier IntentFastTextClassifier) option {
+	return func(c *Classifier) {
+		c.intentFastTextClassifier = classifier
 	}
 }
 
@@ -776,6 +783,36 @@ func NewClassifier(cfg *config.RouterConfig, categoryMapping *CategoryMapping, p
 			}
 			options = append(options, withIntentKeywordMatcher(matcher))
 			logging.Infof("Intent keyword fast-path enabled (mode=%s)", cfg.CategoryModel.EffectiveIntentMatchMode())
+		}
+
+		if cfg.CategoryModel.UseFastTextFallbackToBERT() {
+			modelPath := config.ResolveModelPath(cfg.CategoryModel.IntentFastTextModelPath)
+			if modelPath == "" {
+				return nil, fmt.Errorf("classifier.category_model.intent_fasttext_model_path is required when intent_match_mode=%q", config.IntentMatchModeFastTextFallbackBERT)
+			}
+
+			threshold := cfg.CategoryModel.IntentFastTextThreshold
+			if threshold <= 0 || threshold > 1 {
+				threshold = defaultFastTextThreshold
+			}
+
+			timeoutSec := cfg.CategoryModel.IntentFastTextTimeoutSec
+			if timeoutSec <= 0 {
+				timeoutSec = int(defaultFastTextTimeout.Seconds())
+			}
+
+			ftClassifier, err := NewFastTextIntentClassifier(
+				cfg.CategoryModel.IntentFastTextBinaryPath,
+				modelPath,
+				float64(threshold),
+				time.Duration(timeoutSec)*time.Second,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to initialize intent fastText classifier: %w", err)
+			}
+
+			options = append(options, withIntentFastTextClassifier(ftClassifier))
+			logging.Infof("Intent fastText fast-path enabled (mode=%s, threshold=%.3f, timeout=%ds)", cfg.CategoryModel.EffectiveIntentMatchMode(), threshold, timeoutSec)
 		}
 	}
 
@@ -1388,7 +1425,8 @@ func (c *Classifier) EvaluateAllSignalsWithContext(text string, contextText stri
 			start := time.Now()
 			text := textForSignal(config.SignalTypeDomain)
 
-			if c.intentKeywordMatcher != nil && c.Config.CategoryModel.UseKeywordFallbackToBERT() {
+			mode := c.Config.CategoryModel.EffectiveIntentMatchMode()
+			if c.intentKeywordMatcher != nil && mode == config.IntentMatchModeKeywordFallbackBERT {
 				matchedCategory, matched, matchErr := c.intentKeywordMatcher.Classify(text)
 				if matchErr != nil {
 					logging.Warnf("[Signal Computation] Intent keyword fast-path failed, falling back to BERT: %v", matchErr)
@@ -1410,6 +1448,32 @@ func (c *Classifier) EvaluateAllSignalsWithContext(text string, contextText stri
 					}
 
 					logging.Infof("[Signal Computation] Domain signal matched via keyword fast-path in %v (category=%s)", elapsed, categoryName)
+					return
+				}
+			}
+
+			if c.intentFastTextClassifier != nil && mode == config.IntentMatchModeFastTextFallbackBERT {
+				matchedCategory, confidence, matchErr := c.intentFastTextClassifier.Classify(text)
+				if matchErr != nil {
+					logging.Warnf("[Signal Computation] Intent fastText fast-path failed, falling back to BERT: %v", matchErr)
+				} else if matchedCategory != "" {
+					elapsed := time.Since(start)
+					latencySeconds := elapsed.Seconds()
+					categoryName := c.normalizeDomainCategory(matchedCategory)
+
+					metrics.RecordSignalExtraction(config.SignalTypeDomain, categoryName, latencySeconds)
+					results.Metrics.Domain.ExecutionTimeMs = float64(elapsed.Microseconds()) / 1000.0
+					results.Metrics.Domain.Confidence = confidence
+
+					if categoryName != "" {
+						mu.Lock()
+						metrics.RecordSignalMatch(config.SignalTypeDomain, categoryName)
+						results.MatchedDomainRules = append(results.MatchedDomainRules, categoryName)
+						results.SignalConfidences["domain:"+categoryName] = confidence
+						mu.Unlock()
+					}
+
+					logging.Infof("[Signal Computation] Domain signal matched via fastText fast-path in %v (category=%s, confidence=%.3f)", elapsed, categoryName, confidence)
 					return
 				}
 			}
@@ -2264,7 +2328,8 @@ func (c *Classifier) classifyModalityHybrid(text string, cfg *config.ModalityDet
 
 // ClassifyCategoryWithEntropy performs category classification with entropy-based reasoning decision
 func (c *Classifier) ClassifyCategoryWithEntropy(text string) (string, float64, entropy.ReasoningDecision, error) {
-	if c.intentKeywordMatcher != nil && c.Config.CategoryModel.UseKeywordFallbackToBERT() {
+	mode := c.Config.CategoryModel.EffectiveIntentMatchMode()
+	if c.intentKeywordMatcher != nil && mode == config.IntentMatchModeKeywordFallbackBERT {
 		matchedCategory, matched, err := c.intentKeywordMatcher.Classify(text)
 		if err != nil {
 			logging.Warnf("intent keyword fast-path failed, falling back to model inference: %v", err)
@@ -2274,6 +2339,20 @@ func (c *Classifier) ClassifyCategoryWithEntropy(text string) (string, float64, 
 				reasoningDecision := c.makeReasoningDecisionForKeywordCategory(category)
 				logging.Infof("Intent category matched via keyword fast-path: category=%s", category)
 				return category, 1.0, reasoningDecision, nil
+			}
+		}
+	}
+
+	if c.intentFastTextClassifier != nil && mode == config.IntentMatchModeFastTextFallbackBERT {
+		category, confidence, err := c.intentFastTextClassifier.Classify(text)
+		if err != nil {
+			logging.Warnf("intent fastText fast-path failed, falling back to model inference: %v", err)
+		} else if category != "" {
+			normalized := c.normalizeDomainCategory(category)
+			if normalized != "" {
+				reasoningDecision := c.makeReasoningDecisionForKeywordCategory(normalized)
+				logging.Infof("Intent category matched via fastText fast-path: category=%s, confidence=%.3f", normalized, confidence)
+				return normalized, confidence, reasoningDecision, nil
 			}
 		}
 	}

@@ -3,8 +3,9 @@ package config
 import "strings"
 
 const (
-	IntentMatchModeBERT                = "bert"
-	IntentMatchModeKeywordFallbackBERT = "keyword_fallback_bert"
+	IntentMatchModeBERT                 = "bert"
+	IntentMatchModeKeywordFallbackBERT  = "keyword_fallback_bert"
+	IntentMatchModeFastTextFallbackBERT = "fasttext_fallback_bert"
 )
 
 // Classifier represents the configuration for text classification.
@@ -32,6 +33,10 @@ type CategoryModel struct {
 	IntentMatchMode            string  `yaml:"intent_match_mode,omitempty"`
 	IntentKeywordMappingPath   string  `yaml:"intent_keyword_mapping_path,omitempty"`
 	IntentKeywordCaseSensitive bool    `yaml:"intent_keyword_case_sensitive,omitempty"`
+	IntentFastTextModelPath    string  `yaml:"intent_fasttext_model_path,omitempty"`
+	IntentFastTextBinaryPath   string  `yaml:"intent_fasttext_binary_path,omitempty"`
+	IntentFastTextThreshold    float32 `yaml:"intent_fasttext_threshold,omitempty"`
+	IntentFastTextTimeoutSec   int     `yaml:"intent_fasttext_timeout_seconds,omitempty"`
 }
 
 func (m CategoryModel) EffectiveIntentMatchMode() string {
@@ -42,11 +47,18 @@ func (m CategoryModel) EffectiveIntentMatchMode() string {
 	if mode == IntentMatchModeKeywordFallbackBERT {
 		return IntentMatchModeKeywordFallbackBERT
 	}
+	if mode == IntentMatchModeFastTextFallbackBERT {
+		return IntentMatchModeFastTextFallbackBERT
+	}
 	return IntentMatchModeBERT
 }
 
 func (m CategoryModel) UseKeywordFallbackToBERT() bool {
 	return m.EffectiveIntentMatchMode() == IntentMatchModeKeywordFallbackBERT
+}
+
+func (m CategoryModel) UseFastTextFallbackToBERT() bool {
+	return m.EffectiveIntentMatchMode() == IntentMatchModeFastTextFallbackBERT
 }
 
 type PIIModel struct {

@@ -23,11 +23,24 @@ type MockIntentKeywordMatcher struct {
 	err      error
 }
 
+type MockIntentFastTextClassifier struct {
+	category   string
+	confidence float64
+	err        error
+}
+
 func (m *MockIntentKeywordMatcher) Classify(_ string) (string, bool, error) {
 	return m.category, m.matched, m.err
 }
 
 func (m *MockIntentKeywordMatcher) Free() {}
+
+func (m *MockIntentFastTextClassifier) Classify(_ string) (string, float64, error) {
+	if m.err != nil {
+		return "", 0, m.err
+	}
+	return m.category, m.confidence, nil
+}
 
 func (m *MockCategoryInference) Classify(_ string) (candle_binding.ClassResult, error) {
 	return m.classifyResult, m.classifyError
@@ -90,6 +103,12 @@ func buildDomainClassifierWithMatcher(mock *MockCategoryInference, matcher Inten
 		categoryInference:    mock,
 		intentKeywordMatcher: matcher,
 	}
+}
+
+func buildDomainClassifierWithFastText(mock *MockCategoryInference, classifier IntentFastTextClassifier) *Classifier {
+	base := buildDomainClassifier(mock)
+	base.intentFastTextClassifier = classifier
+	return base
 }
 
 var _ = Describe("Domain signal: low entropy (confident)", func() {
@@ -240,6 +259,40 @@ var _ = Describe("Domain signal: keyword fallback mode", func() {
 
 		classifier := buildDomainClassifierWithMatcher(mock, matcher)
 		classifier.Config.CategoryModel.IntentMatchMode = config.IntentMatchModeKeywordFallbackBERT
+
+		results := classifier.EvaluateAllSignals("supply demand and market shocks")
+
+		Expect(results.MatchedDomainRules).To(ContainElement("economics"))
+		Expect(results.SignalConfidences).To(HaveKey("domain:economics"))
+	})
+})
+
+var _ = Describe("Domain signal: fastText fallback mode", func() {
+	It("should short-circuit to fastText category when matched", func() {
+		mock := &MockCategoryInference{
+			classifyWithProbsError: errors.New("should not be called"),
+		}
+		fastText := &MockIntentFastTextClassifier{category: "economics", confidence: 0.82}
+
+		classifier := buildDomainClassifierWithFastText(mock, fastText)
+		classifier.Config.CategoryModel.IntentMatchMode = config.IntentMatchModeFastTextFallbackBERT
+
+		results := classifier.EvaluateAllSignals("latest stock market movements")
+
+		Expect(results.MatchedDomainRules).To(ContainElement("economics"))
+		Expect(results.SignalConfidences).To(HaveKeyWithValue("domain:economics", BeNumerically("==", 0.82)))
+	})
+
+	It("should fall back to BERT path when fastText matcher misses", func() {
+		mock := &MockCategoryInference{
+			classifyWithProbsResult: candle_binding.ClassResultWithProbs{
+				Class: 4, Confidence: 0.83,
+			},
+		}
+		fastText := &MockIntentFastTextClassifier{}
+
+		classifier := buildDomainClassifierWithFastText(mock, fastText)
+		classifier.Config.CategoryModel.IntentMatchMode = config.IntentMatchModeFastTextFallbackBERT
 
 		results := classifier.EvaluateAllSignals("supply demand and market shocks")
 
