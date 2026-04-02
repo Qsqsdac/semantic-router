@@ -11,6 +11,14 @@ from typing import Any, Dict, List
 
 SUPPORTED_DATASET = "TIGER-Lab/MMLU-Pro"
 SUPPORTED_SPLIT = "test"
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def resolve_path(value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return (SCRIPT_DIR / path).resolve()
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,9 +28,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-samples", type=int, default=0, help="0 means all")
     parser.add_argument("--train-ratio", type=float, default=0.9)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--fasttext-bin", default="./bin/fasttext.real")
-    parser.add_argument("--work-dir", default="./.build/fasttext-intent")
-    parser.add_argument("--output-model", default="./models/intent_fasttext.bin")
+    parser.add_argument("--fasttext-bin", default="bin/fasttext.real")
+    parser.add_argument("--work-dir", default=".build/fasttext-intent")
+    parser.add_argument("--output-model", default="models/intent_fasttext.bin")
 
     parser.add_argument("--lr", type=float, default=0.8)
     parser.add_argument("--epoch", type=int, default=40)
@@ -63,7 +71,7 @@ def load_with_datasets(dataset_name: str, split: str, max_samples: int) -> List[
 
     ds = load_dataset(dataset_name, split=split)
     if max_samples > 0:
-        ds = ds.select(range(min(max_samples, len(ds))))
+        ds = ds.select(range(len(ds)-max_samples, len(ds)))
     return [dict(item) for item in ds]
 
 
@@ -121,12 +129,12 @@ def main() -> None:
 
     os.environ.setdefault("HF_ENDPOINT", args.hf_endpoint)
 
-    work_dir = Path(args.work_dir).resolve()
+    work_dir = resolve_path(args.work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
-    output_model = Path(args.output_model).resolve()
+    output_model = resolve_path(args.output_model)
     output_model.parent.mkdir(parents=True, exist_ok=True)
 
-    fasttext_bin = Path(args.fasttext_bin).resolve()
+    fasttext_bin = resolve_path(args.fasttext_bin)
     if not fasttext_bin.exists():
         raise SystemExit(f"fasttext binary not found: {fasttext_bin}")
 

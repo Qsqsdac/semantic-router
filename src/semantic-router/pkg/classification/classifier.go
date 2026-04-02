@@ -785,10 +785,10 @@ func NewClassifier(cfg *config.RouterConfig, categoryMapping *CategoryMapping, p
 			logging.Infof("Intent keyword fast-path enabled (mode=%s)", cfg.CategoryModel.EffectiveIntentMatchMode())
 		}
 
-		if cfg.CategoryModel.UseFastTextFallbackToBERT() {
+		if cfg.CategoryModel.UseFastTextPath() {
 			modelPath := config.ResolveModelPath(cfg.CategoryModel.IntentFastTextModelPath)
 			if modelPath == "" {
-				return nil, fmt.Errorf("classifier.category_model.intent_fasttext_model_path is required when intent_match_mode=%q", config.IntentMatchModeFastTextFallbackBERT)
+				return nil, fmt.Errorf("classifier.category_model.intent_fasttext_model_path is required when intent_match_mode=%q", cfg.CategoryModel.EffectiveIntentMatchMode())
 			}
 
 			threshold := cfg.CategoryModel.IntentFastTextThreshold
@@ -814,6 +814,36 @@ func NewClassifier(cfg *config.RouterConfig, categoryMapping *CategoryMapping, p
 			options = append(options, withIntentFastTextClassifier(ftClassifier))
 			logging.Infof("Intent fastText fast-path enabled (mode=%s, threshold=%.3f, timeout=%ds)", cfg.CategoryModel.EffectiveIntentMatchMode(), threshold, timeoutSec)
 		}
+	}
+
+	if cfg.CategoryModel.ModelID == "" && cfg.CategoryModel.UseFastTextPath() {
+		modelPath := config.ResolveModelPath(cfg.CategoryModel.IntentFastTextModelPath)
+		if modelPath == "" {
+			return nil, fmt.Errorf("classifier.category_model.intent_fasttext_model_path is required when intent_match_mode=%q", cfg.CategoryModel.EffectiveIntentMatchMode())
+		}
+
+		threshold := cfg.CategoryModel.IntentFastTextThreshold
+		if threshold <= 0 || threshold > 1 {
+			threshold = defaultFastTextThreshold
+		}
+
+		timeoutSec := cfg.CategoryModel.IntentFastTextTimeoutSec
+		if timeoutSec <= 0 {
+			timeoutSec = int(defaultFastTextTimeout.Seconds())
+		}
+
+		ftClassifier, err := NewFastTextIntentClassifier(
+			cfg.CategoryModel.IntentFastTextBinaryPath,
+			modelPath,
+			float64(threshold),
+			time.Duration(timeoutSec)*time.Second,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize intent fastText classifier: %w", err)
+		}
+
+		options = append(options, withIntentFastTextClassifier(ftClassifier))
+		logging.Infof("Intent fastText fast-path enabled (mode=%s, threshold=%.3f, timeout=%ds)", cfg.CategoryModel.EffectiveIntentMatchMode(), threshold, timeoutSec)
 	}
 
 	// Add MCP classifier if configured
@@ -1418,7 +1448,10 @@ func (c *Classifier) EvaluateAllSignalsWithContext(text string, contextText stri
 	}
 
 	// Evaluate domain rules: uses entropy analysis for multi-category matching when available, top-1 fallback otherwise (BERT-base, mmBERT-32K).
-	if isSignalTypeUsed(usedSignals, config.SignalTypeDomain) && c.IsCategoryEnabled() && c.categoryInference != nil && c.CategoryMapping != nil {
+	intentMode := c.Config.CategoryModel.EffectiveIntentMatchMode()
+	domainModelReady := intentMode != config.IntentMatchModeFastTextOnly && c.IsCategoryEnabled() && c.categoryInference != nil && c.CategoryMapping != nil
+	domainFastTextReady := c.intentFastTextClassifier != nil && c.Config.CategoryModel.UseFastTextPath()
+	if isSignalTypeUsed(usedSignals, config.SignalTypeDomain) && (domainModelReady || domainFastTextReady) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -1452,10 +1485,17 @@ func (c *Classifier) EvaluateAllSignalsWithContext(text string, contextText stri
 				}
 			}
 
-			if c.intentFastTextClassifier != nil && mode == config.IntentMatchModeFastTextFallbackBERT {
+			if c.intentFastTextClassifier != nil && c.Config.CategoryModel.UseFastTextPath() {
 				matchedCategory, confidence, matchErr := c.intentFastTextClassifier.Classify(text)
 				if matchErr != nil {
 					logging.Warnf("[Signal Computation] Intent fastText fast-path failed, falling back to BERT: %v", matchErr)
+					if mode == config.IntentMatchModeFastTextOnly {
+						elapsed := time.Since(start)
+						results.Metrics.Domain.ExecutionTimeMs = float64(elapsed.Microseconds()) / 1000.0
+						results.Metrics.Domain.Confidence = 0.0
+						metrics.RecordSignalExtraction(config.SignalTypeDomain, "", elapsed.Seconds())
+						return
+					}
 				} else if matchedCategory != "" {
 					elapsed := time.Since(start)
 					latencySeconds := elapsed.Seconds()
@@ -1474,6 +1514,13 @@ func (c *Classifier) EvaluateAllSignalsWithContext(text string, contextText stri
 					}
 
 					logging.Infof("[Signal Computation] Domain signal matched via fastText fast-path in %v (category=%s, confidence=%.3f)", elapsed, categoryName, confidence)
+					return
+				} else if mode == config.IntentMatchModeFastTextOnly {
+					elapsed := time.Since(start)
+					results.Metrics.Domain.ExecutionTimeMs = float64(elapsed.Microseconds()) / 1000.0
+					results.Metrics.Domain.Confidence = 0.0
+					metrics.RecordSignalExtraction(config.SignalTypeDomain, "", elapsed.Seconds())
+					logging.Infof("[Signal Computation] Domain signal fastText-only mode returned no match in %v", elapsed)
 					return
 				}
 			}
@@ -2343,7 +2390,7 @@ func (c *Classifier) ClassifyCategoryWithEntropy(text string) (string, float64, 
 		}
 	}
 
-	if c.intentFastTextClassifier != nil && mode == config.IntentMatchModeFastTextFallbackBERT {
+	if c.intentFastTextClassifier != nil && c.Config.CategoryModel.UseFastTextPath() {
 		category, confidence, err := c.intentFastTextClassifier.Classify(text)
 		if err != nil {
 			logging.Warnf("intent fastText fast-path failed, falling back to model inference: %v", err)
@@ -2354,7 +2401,13 @@ func (c *Classifier) ClassifyCategoryWithEntropy(text string) (string, float64, 
 				logging.Infof("Intent category matched via fastText fast-path: category=%s, confidence=%.3f", normalized, confidence)
 				return normalized, confidence, reasoningDecision, nil
 			}
+		} else if mode == config.IntentMatchModeFastTextOnly {
+			return "", 0.0, entropy.ReasoningDecision{}, fmt.Errorf("fastText-only mode produced no category")
 		}
+	}
+
+	if mode == config.IntentMatchModeFastTextOnly {
+		return "", 0.0, entropy.ReasoningDecision{}, fmt.Errorf("fastText-only mode is enabled but fastText classifier is unavailable")
 	}
 
 	// Try keyword classifier first

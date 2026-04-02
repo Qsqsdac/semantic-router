@@ -1400,7 +1400,7 @@ global:
           intent_keyword_mapping_path: models/mmbert32k-intent-classifier-merged/intent_keyword_mapping.json
           intent_keyword_case_sensitive: false
           intent_fasttext_model_path: models/intent_fasttext.bin
-          intent_fasttext_binary_path: fasttext
+          intent_fasttext_binary_path: fasttext.real
           intent_fasttext_threshold: 0.5
           intent_fasttext_timeout_seconds: 2
         mcp:

@@ -6,6 +6,7 @@ const (
 	IntentMatchModeBERT                 = "bert"
 	IntentMatchModeKeywordFallbackBERT  = "keyword_fallback_bert"
 	IntentMatchModeFastTextFallbackBERT = "fasttext_fallback_bert"
+	IntentMatchModeFastTextOnly         = "fasttext_only"
 )
 
 // Classifier represents the configuration for text classification.
@@ -50,6 +51,9 @@ func (m CategoryModel) EffectiveIntentMatchMode() string {
 	if mode == IntentMatchModeFastTextFallbackBERT {
 		return IntentMatchModeFastTextFallbackBERT
 	}
+	if mode == IntentMatchModeFastTextOnly {
+		return IntentMatchModeFastTextOnly
+	}
 	return IntentMatchModeBERT
 }
 
@@ -59,6 +63,15 @@ func (m CategoryModel) UseKeywordFallbackToBERT() bool {
 
 func (m CategoryModel) UseFastTextFallbackToBERT() bool {
 	return m.EffectiveIntentMatchMode() == IntentMatchModeFastTextFallbackBERT
+}
+
+func (m CategoryModel) UseFastTextOnly() bool {
+	return m.EffectiveIntentMatchMode() == IntentMatchModeFastTextOnly
+}
+
+func (m CategoryModel) UseFastTextPath() bool {
+	mode := m.EffectiveIntentMatchMode()
+	return mode == IntentMatchModeFastTextFallbackBERT || mode == IntentMatchModeFastTextOnly
 }
 
 type PIIModel struct {

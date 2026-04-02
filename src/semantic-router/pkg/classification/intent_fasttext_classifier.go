@@ -1,13 +1,14 @@
 package classification
 
 import (
+	"bufio"
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/observability/logging"
@@ -31,6 +32,12 @@ type FastTextIntentClassifier struct {
 	modelPath  string
 	threshold  float64
 	timeout    time.Duration
+
+	mu     sync.Mutex
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout *bufio.Reader
+	stderr bytes.Buffer
 }
 
 // NewFastTextIntentClassifier builds a CLI-backed FastText classifier with sane defaults.
@@ -47,48 +54,135 @@ func NewFastTextIntentClassifier(binaryPath, modelPath string, threshold float64
 	if timeout <= 0 {
 		timeout = defaultFastTextTimeout
 	}
-	return &FastTextIntentClassifier{
+
+	classifier := &FastTextIntentClassifier{
 		binaryPath: binaryPath,
 		modelPath:  modelPath,
 		threshold:  threshold,
 		timeout:    timeout,
-	}, nil
+	}
+
+	if err := classifier.initializePersistentProcess(); err != nil {
+		return nil, err
+	}
+
+	logging.Infof("Initialized persistent fastText intent process (threshold=%.3f, timeout=%s)", threshold, timeout)
+	return classifier, nil
 }
 
-// Classify predicts the best-matching intent using FastText `predict-prob`.
-func (f *FastTextIntentClassifier) Classify(text string) (string, float64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), f.timeout)
-	defer cancel()
+func (f *FastTextIntentClassifier) initializePersistentProcess() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
-	cmd := exec.CommandContext(ctx, f.binaryPath, "predict-prob", f.modelPath, "-", "1")
+	if err := f.startProcessLocked(); err != nil {
+		return err
+	}
+
+	probe, err := f.requestPredictionLineLocked("startup health check")
+	if err != nil {
+		f.stopProcessLocked()
+		return err
+	}
+	if strings.TrimSpace(probe) == "" {
+		f.stopProcessLocked()
+		return fmt.Errorf("fastText startup probe returned empty output")
+	}
+
+	return nil
+}
+
+func (f *FastTextIntentClassifier) startProcessLocked() error {
+	f.stderr.Reset()
+
+	cmd := exec.Command(f.binaryPath, "predict-prob", f.modelPath, "-", "1")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to open stdin for fastText: %w", err)
+		return fmt.Errorf("failed to open stdin for fastText: %w", err)
 	}
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return fmt.Errorf("failed to open stdout for fastText: %w", err)
+	}
+	cmd.Stderr = &f.stderr
 
 	if err := cmd.Start(); err != nil {
-		return "", 0, fmt.Errorf("failed to start fastText: %w", err)
+		_ = stdin.Close()
+		_ = stdout.Close()
+		return fmt.Errorf("failed to start fastText: %w", err)
 	}
 
+	f.cmd = cmd
+	f.stdin = stdin
+	f.stdout = bufio.NewReader(stdout)
+	return nil
+}
+
+func (f *FastTextIntentClassifier) stopProcessLocked() {
+	if f.stdin != nil {
+		_ = f.stdin.Close()
+	}
+	if f.cmd != nil && f.cmd.Process != nil {
+		_ = f.cmd.Process.Kill()
+		_ = f.cmd.Wait()
+	}
+	f.cmd = nil
+	f.stdin = nil
+	f.stdout = nil
+}
+
+func (f *FastTextIntentClassifier) ensureProcessLocked() error {
+	if f.cmd != nil && f.cmd.ProcessState == nil {
+		return nil
+	}
+	f.stopProcessLocked()
+	if err := f.startProcessLocked(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (f *FastTextIntentClassifier) requestPredictionLineLocked(text string) (string, error) {
 	cleaned := strings.ReplaceAll(text, "\n", " ") + "\n"
-	if _, err := io.WriteString(stdin, cleaned); err != nil {
-		return "", 0, fmt.Errorf("failed to write to fastText stdin: %w", err)
+	if _, err := io.WriteString(f.stdin, cleaned); err != nil {
+		return "", fmt.Errorf("failed to write to fastText stdin: %w", err)
 	}
-	_ = stdin.Close()
 
-	if err := cmd.Wait(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return "", 0, fmt.Errorf("fastText prediction timed out after %s", f.timeout)
+	type readResult struct {
+		line string
+		err  error
+	}
+	resultCh := make(chan readResult, 1)
+	go func() {
+		line, err := f.stdout.ReadString('\n')
+		resultCh <- readResult{line: line, err: err}
+	}()
+
+	select {
+	case r := <-resultCh:
+		if r.err != nil {
+			return "", fmt.Errorf("failed to read fastText output: %w", r.err)
 		}
-		return "", 0, fmt.Errorf("fastText prediction failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+		return strings.TrimSpace(r.line), nil
+	case <-time.After(f.timeout):
+		f.stopProcessLocked()
+		return "", fmt.Errorf("fastText prediction timed out after %s", f.timeout)
+	}
+}
+
+// Classify predicts the best-matching intent using a persistent FastText process.
+func (f *FastTextIntentClassifier) Classify(text string) (string, float64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if err := f.ensureProcessLocked(); err != nil {
+		return "", 0, fmt.Errorf("failed to ensure fastText process: %w", err)
 	}
 
-	output := strings.TrimSpace(stdout.String())
+	output, err := f.requestPredictionLineLocked(text)
+	if err != nil {
+		return "", 0, fmt.Errorf("fastText prediction failed: %w: %s", err, strings.TrimSpace(f.stderr.String()))
+	}
 	if output == "" {
 		return "", 0, nil
 	}

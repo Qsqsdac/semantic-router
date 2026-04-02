@@ -53,6 +53,6 @@ global:
           intent_keyword_mapping_path: /app/intent-assets/intent_keyword_mapping.json
           intent_keyword_case_sensitive: false
           intent_fasttext_model_path: /app/intent-assets/models/intent_fasttext.bin
-          intent_fasttext_binary_path: /app/intent-assets/bin/fasttext
-          intent_fasttext_threshold: 0.5
+          intent_fasttext_binary_path: /app/intent-assets/bin/fasttext.real
+          intent_fasttext_threshold: 0.95
           intent_fasttext_timeout_seconds: 2

@@ -45,6 +45,22 @@ func TestCategoryModelEffectiveIntentMatchModeNormalizesFastTextMode(t *testing.
 	if !cfg.UseFastTextFallbackToBERT() {
 		t.Fatal("expected fastText fallback mode to be enabled")
 	}
+	if !cfg.UseFastTextPath() {
+		t.Fatal("expected fastText path helper to be enabled")
+	}
+}
+
+func TestCategoryModelEffectiveIntentMatchModeNormalizesFastTextOnlyMode(t *testing.T) {
+	cfg := CategoryModel{IntentMatchMode: " FASTTEXT_ONLY "}
+	if got := cfg.EffectiveIntentMatchMode(); got != IntentMatchModeFastTextOnly {
+		t.Fatalf("expected normalized intent mode %q, got %q", IntentMatchModeFastTextOnly, got)
+	}
+	if !cfg.UseFastTextOnly() {
+		t.Fatal("expected fastText only mode to be enabled")
+	}
+	if !cfg.UseFastTextPath() {
+		t.Fatal("expected fastText path helper to be enabled")
+	}
 }
 
 func TestCategoryModelEffectiveIntentMatchModeFallsBackOnUnknownMode(t *testing.T) {

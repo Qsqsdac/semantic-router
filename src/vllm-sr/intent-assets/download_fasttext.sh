@@ -82,7 +82,7 @@ main() {
   fi
 
   local archive="${CACHE_DIR}/fastText-${FASTTEXT_VERSION}.tar.gz"
-  local src_root="${BUILD_DIR}/fastText-${FASTTEXT_VERSION}"
+  local src_root=""
   local install_path="${BIN_DIR}/fasttext.real"
 
   if [[ ! -s "${archive}" ]]; then
@@ -115,20 +115,23 @@ main() {
     log "using cached archive: ${archive}"
   fi
 
-  rm -rf "${src_root}"
-  mkdir -p "${src_root}"
+  # Clean stale extracted trees from previous runs.
+  rm -rf "${BUILD_DIR}/fastText-${FASTTEXT_VERSION}" "${BUILD_DIR}/fastText-${FASTTEXT_VERSION#v}"
   tar -xzf "${archive}" -C "${BUILD_DIR}"
 
-  if [[ ! -d "${src_root}" ]]; then
-    # Some mirrors may package directory name slightly differently.
-    local extracted
-    extracted="$(tar -tzf "${archive}" | head -n1 | cut -d/ -f1)"
-    if [[ -n "${extracted}" && -d "${BUILD_DIR}/${extracted}" ]]; then
+  # Detect extracted source root robustly (v0.9.2 vs 0.9.2 naming, mirror differences).
+  while IFS= read -r extracted; do
+    [[ -z "${extracted}" ]] && continue
+    if [[ -f "${BUILD_DIR}/${extracted}/Makefile" ]]; then
       src_root="${BUILD_DIR}/${extracted}"
-    else
-      log "failed to detect extracted source dir"
-      exit 1
+      break
     fi
+  done < <(tar -tzf "${archive}" | cut -d/ -f1 | sort -u)
+
+  if [[ -z "${src_root}" ]]; then
+    log "failed to detect extracted source dir with Makefile"
+    log "tip: cached archive might be broken, remove ${archive} and rerun"
+    exit 1
   fi
 
   log "building fastText from source: ${src_root}"
@@ -153,10 +156,12 @@ main() {
   fi
 
   log "verification"
-  "${install_path}" --help >/dev/null 2>&1 || {
-    log "warning: installed binary failed --help check"
+  local verify_out
+  verify_out="$("${install_path}" 2>&1 || true)"
+  if [[ "${verify_out}" != *"usage: fasttext"* ]]; then
+    log "warning: installed binary failed usage check"
     exit 1
-  }
+  fi
 
   log "done"
   log "next: put a real model at ${INTENT_ASSETS_DIR}/models/intent_fasttext.bin"
