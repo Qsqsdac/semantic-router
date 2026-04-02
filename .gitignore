@@ -199,3 +199,8 @@ src/training/cache_embeddings/aws/vllm-inventory-*.ini
 grafana/
 grafana-data/
 prometheus-data/
+
+src/vllm-sr/intent-assets/.cache
+src/vllm-sr/intent-assets/.build
+src/vllm-sr/intent-assets/bin
+src/vllm-sr/intent-assets/models
