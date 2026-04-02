@@ -70,6 +70,7 @@ def load_with_datasets(dataset_name: str, split: str, max_samples: int) -> List[
     from datasets import load_dataset
 
     ds = load_dataset(dataset_name, split=split)
+    ds = ds.shuffle(seed=42)
     if max_samples > 0:
         ds = ds.select(range(len(ds)-max_samples, len(ds)))
     return [dict(item) for item in ds]
@@ -90,8 +91,9 @@ def load_with_hf_hub_parquet(dataset_name: str, split: str, max_samples: int) ->
     frames = [pd.read_parquet(p) for p in target_files]
     df = pd.concat(frames, ignore_index=True)
     records = df.to_dict(orient="records")
+    random.Random(42).shuffle(records)
     if max_samples > 0:
-        records = records[:max_samples]
+        records = records[len(records)-max_samples:]
     return records
 
 

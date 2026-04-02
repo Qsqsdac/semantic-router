@@ -17,16 +17,29 @@ python scripts/eval_classification_api_intent.py \
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
+import random
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 
 
-SUPPORTED_DATASET = "TIGER-Lab/MMLU-Pro"
-SUPPORTED_SPLIT = "test"
+DEFAULT_DATASET = "TIGER-Lab/MMLU-Pro"
+SUPPORTED_DATASETS: Dict[str, Dict[str, str]] = {
+    "TIGER-Lab/MMLU-Pro": {
+        "default_split": "test",
+        "text_field": "question",
+        "label_field": "category",
+    },
+    "LLM-Semantic-Router/category-classifier-supplement": {
+        "default_split": "train",
+        "text_field": "text",
+        "label_field": "label",
+    },
+}
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "reports" / "classification-intent"
 
@@ -42,13 +55,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dataset",
-        default=SUPPORTED_DATASET,
-        help=f"HF dataset for intent benchmark (default: {SUPPORTED_DATASET})",
+        default=DEFAULT_DATASET,
+        help=(
+            "HF dataset for intent benchmark "
+            f"(default: {DEFAULT_DATASET}, supported: {', '.join(SUPPORTED_DATASETS)})"
+        ),
     )
     parser.add_argument(
         "--split",
-        default=SUPPORTED_SPLIT,
-        help=f"Dataset split (default: {SUPPORTED_SPLIT})",
+        default=None,
+        help="Dataset split, if omitted uses dataset default split",
     )
     parser.add_argument(
         "--max-samples",
@@ -92,18 +108,27 @@ def normalize_category(value: Any) -> str:
     return alias.get(text, text)
 
 
-def _load_mmlu_pro_with_datasets(
+def resolve_dataset_split(dataset_name: str, split: Optional[str]) -> str:
+    cfg = SUPPORTED_DATASETS.get(dataset_name)
+    if not cfg:
+        supported = ", ".join(SUPPORTED_DATASETS.keys())
+        raise SystemExit(f"不支持的数据集: {dataset_name}。可选: {supported}")
+    return split or cfg["default_split"]
+
+
+def _load_dataset_with_datasets(
     dataset_name: str, split: str, max_samples: int
 ) -> List[Dict[str, Any]]:
     from datasets import load_dataset
 
     ds = load_dataset(dataset_name, split=split)
+    ds = ds.shuffle(seed=42)
     if max_samples > 0:
         ds = ds.select(range(min(max_samples, len(ds))))
     return [dict(item) for item in ds]
 
 
-def _load_mmlu_pro_with_hf_hub_parquet(
+def _load_dataset_with_hf_hub_parquet(
     dataset_name: str, split: str, max_samples: int
 ) -> List[Dict[str, Any]]:
     """Fallback loader when `datasets` import fails due to version mismatch.
@@ -129,20 +154,55 @@ def _load_mmlu_pro_with_hf_hub_parquet(
     df = pd.concat(frames, ignore_index=True)
 
     records = df.to_dict(orient="records")
+    random.Random(42).shuffle(records)
     if max_samples > 0:
         records = records[:max_samples]
     return records
 
 
-def load_mmlu_pro(dataset_name: str, split: str, max_samples: int) -> List[Dict[str, Any]]:
+def load_hf_dataset(dataset_name: str, split: str, max_samples: int) -> List[Dict[str, Any]]:
     try:
-        return _load_mmlu_pro_with_datasets(dataset_name, split, max_samples)
+        return _load_dataset_with_datasets(dataset_name, split, max_samples)
     except Exception as exc:
         print(
             "[warn] datasets loader failed, fallback to huggingface_hub+parquet.",
             f"reason: {exc}",
         )
-        return _load_mmlu_pro_with_hf_hub_parquet(dataset_name, split, max_samples)
+        return _load_dataset_with_hf_hub_parquet(dataset_name, split, max_samples)
+
+
+def extract_eval_fields(sample: Dict[str, Any], dataset_name: str) -> Dict[str, Any]:
+    cfg = SUPPORTED_DATASETS[dataset_name]
+    text = str(sample.get(cfg["text_field"], "")).strip()
+    expected_raw = sample.get(cfg["label_field"], "")
+    return {
+        "text": text,
+        "expected_raw": expected_raw,
+        "expected_norm": normalize_category(expected_raw),
+    }
+
+
+def print_dataset_stats(dataset_name: str, split: str, samples: List[Dict[str, Any]]) -> None:
+    labels: List[str] = []
+    text_lengths: List[int] = []
+
+    for sample in samples:
+        fields = extract_eval_fields(sample, dataset_name)
+        labels.append(fields["expected_norm"])
+        text_lengths.append(len(fields["text"]))
+
+    label_counter = Counter(label for label in labels if label)
+    avg_text_len = (sum(text_lengths) / len(text_lengths)) if text_lengths else 0.0
+
+    print("[info] selected dataset summary:")
+    print(f"  - dataset: {dataset_name}")
+    print(f"  - split: {split}")
+    print(f"  - sample_count: {len(samples)}")
+    print(f"  - unique_labels: {len(label_counter)}")
+    print(f"  - avg_text_length: {avg_text_len:.1f}")
+    print("  - label_distribution:")
+    for label, count in label_counter.most_common():
+        print(f"    * {label}: {count}")
 
 
 def classify_intent(router_url: str, text: str, timeout: int) -> Dict[str, Any]:
@@ -186,10 +246,7 @@ def write_jsonl(path: Path, rows: List[Dict[str, Any]]) -> None:
 def main() -> None:
     args = parse_args()
 
-    if args.dataset != SUPPORTED_DATASET:
-        raise SystemExit(
-            "当前脚本只针对 intent/domain 场景，建议使用 TIGER-Lab/MMLU-Pro。"
-        )
+    split = resolve_dataset_split(args.dataset, args.split)
 
     print("[info] 当前脚本用于 /api/v1/classify/intent 的规模化评测。")
     print("[info] 非 intent 任务（如 pii/security/fact-check）后续可独立扩展。")
@@ -202,9 +259,10 @@ def main() -> None:
     except Exception as exc:
         raise SystemExit(f"无法连接 Classification API: {health_url} ({exc})")
 
-    samples = load_mmlu_pro(args.dataset, args.split, args.max_samples)
+    samples = load_hf_dataset(args.dataset, split, args.max_samples)
     total = len(samples)
     print(f"[info] loaded samples: {total}")
+    print_dataset_stats(args.dataset, split, samples)
 
     started = time.time()
     details: List[Dict[str, Any]] = []
@@ -216,14 +274,15 @@ def main() -> None:
     processing_times: List[float] = []
 
     for idx, sample in enumerate(samples, start=1):
-        question = str(sample.get("question", ""))
-        expected_raw = sample.get("category", "")
-        expected_norm = normalize_category(expected_raw)
+        fields = extract_eval_fields(sample, args.dataset)
+        question = fields["text"]
+        expected_raw = fields["expected_raw"]
+        expected_norm = fields["expected_norm"]
 
         row: Dict[str, Any] = {
             "index": idx,
             "dataset": args.dataset,
-            "split": args.split,
+            "split": split,
             "question": question,
             "expected_raw": expected_raw,
             "expected_norm": expected_norm,
@@ -305,7 +364,7 @@ def main() -> None:
         "router_url": args.router_url,
         "endpoint": "/api/v1/classify/intent",
         "dataset": args.dataset,
-        "split": args.split,
+        "split": split,
         "total_samples": total,
         "ok_count": ok_count,
         "fail_count": fail_count,
@@ -325,7 +384,7 @@ def main() -> None:
 
     print("\n=== Benchmark Done ===")
     print(f"run_id: {run_id}")
-    print(f"dataset: {args.dataset} ({args.split})")
+    print(f"dataset: {args.dataset} ({split})")
     print(f"accuracy: {accuracy:.4f} ({correct}/{evaluated})")
     if avg_processing_time_ms is not None:
         print(f"avg_processing_time_ms: {avg_processing_time_ms:.2f}")
