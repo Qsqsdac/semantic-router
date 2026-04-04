@@ -49,6 +49,7 @@ func evaluateResponseHeaderOutcome(
 
 	if ctx != nil {
 		ctx.IsStreamingResponse = isStreamingContentType(v.ResponseHeaders.Headers)
+		ctx.UpstreamStatusCode = getStatusFromHeaders(v.ResponseHeaders.Headers)
 	}
 
 	outcome.statusCode = getStatusFromHeaders(v.ResponseHeaders.Headers)

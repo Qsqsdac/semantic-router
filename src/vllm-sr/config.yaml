@@ -8,29 +8,45 @@ listeners:
 
 providers:
   defaults:
-    default_model: "qwen3-8b"
+    default_model: "MoM"
   models:
-    - name: "qwen3-8b"
-      provider_model_id: "qwen3-8b-instruct"
+    - name: "MoM"
+      provider_model_id: "qwen3.5:0.8b"
       backend_refs:
         - name: "primary"
-          endpoint: "host.docker.internal:8000"
+          endpoint: "10.156.186.8:8080"
           protocol: "http"
+          type: "openai"
+          base_url: "http://10.156.186.8:8080/v1"
+          provider: "openai"
+          auth_header: "Authorization"
+          auth_prefix: "Bearer"
+          api_key: "sk-123456"
+          extra_headers:
+            Authorization: "Bearer sk-123456"
           weight: 100
-    - name: "qwen3-32b"
-      provider_model_id: "qwen3-32b-instruct"
+    - name: "MoM-large"
+      provider_model_id: "qwen3.5:122b"
       backend_refs:
         - name: "primary"
-          endpoint: "host.docker.internal:8001"
+          endpoint: "10.156.186.8:8080"
           protocol: "http"
+          type: "openai"
+          base_url: "http://10.156.186.8:8080/v1"
+          provider: "openai"
+          auth_header: "Authorization"
+          auth_prefix: "Bearer"
+          api_key: "sk-123456"
+          extra_headers:
+            Authorization: "Bearer sk-123456"
           weight: 100
 
 routing:
   modelCards:
-    - name: "qwen3-8b"
+    - name: "MoM"
       description: "Fast default text model"
       capabilities: ["chat", "reasoning"]
-    - name: "qwen3-32b"
+    - name: "MoM-large"
       description: "Higher quality model for hard or urgent queries"
       capabilities: ["chat", "reasoning", "long-context"]
   signals:

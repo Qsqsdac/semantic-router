@@ -133,8 +133,8 @@ func (r *OpenAIRouter) handleAutoModelRouting(openAIRequest *openai.ChatCompleti
 
 	matchedModel := selectedModel
 
-	if matchedModel == originalModel || matchedModel == "" {
-		// No model change needed
+	if matchedModel == "" {
+		// No selection available
 		ctx.RequestModel = originalModel
 		return response, nil
 	}

@@ -145,7 +145,7 @@ func (c *RouterConfig) GetModelAPIFormat(modelName string) string {
 // GetModelAccessKey returns the access key for the given model.
 func (c *RouterConfig) GetModelAccessKey(modelName string) string {
 	if c == nil || c.ModelConfig == nil {
-		return ""
+		return c.getModelAccessKeyFromEndpoints(modelName)
 	}
 	if modelConfig, ok := c.ModelConfig[modelName]; ok {
 		rawKey := modelConfig.AccessKey
@@ -157,7 +157,26 @@ func (c *RouterConfig) GetModelAccessKey(modelName string) string {
 	if _, baseConfig, ok := c.resolveLoRABaseModel(modelName); ok && baseConfig.AccessKey != "" {
 		return os.ExpandEnv(baseConfig.AccessKey)
 	}
-	return ""
+	return c.getModelAccessKeyFromEndpoints(modelName)
+}
+
+func (c *RouterConfig) getModelAccessKeyFromEndpoints(modelName string) string {
+	if c == nil {
+		return ""
+	}
+	var fallback string
+	for _, endpoint := range c.VLLMEndpoints {
+		if endpoint.APIKey != "" {
+			expandedKey := os.ExpandEnv(endpoint.APIKey)
+			if endpoint.Model == modelName || endpoint.Name == modelName {
+				return expandedKey
+			}
+			if fallback == "" {
+				fallback = expandedKey
+			}
+		}
+	}
+	return fallback
 }
 
 // GetDecisionPIIPolicy returns the PII policy for a given decision by looking at

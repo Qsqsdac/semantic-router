@@ -104,3 +104,33 @@ func TestUpdateResponseCache_StoresWhenNoDecisionSelected(t *testing.T) {
 	router.updateResponseCache(ctx, []byte(`{"ok":true}`))
 	assert.True(t, mockCache.updateCalled, "should store response when no decision is selected (global cache applies)")
 }
+
+func TestUpdateResponseCache_SkipsWhenUpstreamNon2xx(t *testing.T) {
+	mockCache := &mockStreamingCache{}
+	cfg := &config.RouterConfig{
+		SemanticCache: config.SemanticCache{Enabled: true},
+	}
+	router := &OpenAIRouter{Cache: mockCache, Config: cfg}
+	ctx := &RequestContext{
+		RequestID:          "req-401",
+		UpstreamStatusCode: 401,
+	}
+
+	router.updateResponseCache(ctx, []byte(`<html>401</html>`))
+	assert.False(t, mockCache.updateCalled, "should not cache non-2xx upstream responses")
+}
+
+func TestUpdateResponseCache_StoresWhenUpstream2xx(t *testing.T) {
+	mockCache := &mockStreamingCache{}
+	cfg := &config.RouterConfig{
+		SemanticCache: config.SemanticCache{Enabled: true},
+	}
+	router := &OpenAIRouter{Cache: mockCache, Config: cfg}
+	ctx := &RequestContext{
+		RequestID:          "req-200",
+		UpstreamStatusCode: 200,
+	}
+
+	router.updateResponseCache(ctx, []byte(`{"ok":true}`))
+	assert.True(t, mockCache.updateCalled, "should cache 2xx upstream responses")
+}

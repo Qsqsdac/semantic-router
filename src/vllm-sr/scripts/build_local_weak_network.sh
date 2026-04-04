@@ -19,6 +19,7 @@ IMAGE="ghcr.io/vllm-project/semantic-router/vllm-sr:latest"
 STACK_NAME="${VLLM_SR_STACK_NAME:-lane-b}"
 PORT_OFFSET="${VLLM_SR_PORT_OFFSET:-200}"
 START_AFTER_BUILD="${START_AFTER_BUILD:-1}"
+GITHUB_MIRROR_PREFIX="${GITHUB_MIRROR_PREFIX:-}"
 
 echo "[1/5] Prepare temporary Dockerfile: ${TMP_DOCKERFILE}"
 cp "${ROOT_DIR}/Dockerfile" "${TMP_DOCKERFILE}"
@@ -41,6 +42,23 @@ sed -i 's#https://registry.npmjs.org/#https://registry.npmmirror.com/#g' "${TMP_
 # Cargo mirror settings.
 perl -0777 -i -pe 's#ENV CARGO_NET_GIT_FETCH_WITH_CLI=true#ENV CARGO_NET_GIT_FETCH_WITH_CLI=true\nENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse\nENV CARGO_REGISTRIES_CRATES_IO_INDEX=https://rsproxy.cn/crates.io-index#g' "${TMP_DOCKERFILE}"
 
+# Harden git/cargo against flaky GitHub links (notably candle git dependency).
+perl -0777 -i -pe 's#\[ "\$GIT_SSL_NO_VERIFY" = "1" \] && git config --global http\.sslVerify false \|\| true;#[ "\$GIT_SSL_NO_VERIFY" = "1" ] && git config --global http.sslVerify false || true; git config --global http.version HTTP/1.1 || true; git config --global http.postBuffer 524288000 || true; git config --global http.lowSpeedLimit 1000 || true; git config --global http.lowSpeedTime 60 || true;#g' "${TMP_DOCKERFILE}"
+
+# Optional GitHub mirror rewrite (disabled by default; enable only when mirror is reachable).
+if [[ -n "${GITHUB_MIRROR_PREFIX}" ]]; then
+	sed -i "s#git config --global http.lowSpeedTime 60 || true;#git config --global http.lowSpeedTime 60 || true; git config --global url.\\\"${GITHUB_MIRROR_PREFIX}\\\".insteadof \\\"https://github.com/\\\" || true;#g" "${TMP_DOCKERFILE}"
+	echo "Using optional GitHub mirror prefix: ${GITHUB_MIRROR_PREFIX}"
+fi
+sed -i 's#ENV CARGO_REGISTRIES_CRATES_IO_INDEX=https://rsproxy.cn/crates.io-index#ENV CARGO_REGISTRIES_CRATES_IO_INDEX=https://rsproxy.cn/crates.io-index\nENV CARGO_NET_RETRY=20\nENV CARGO_HTTP_TIMEOUT=120\nENV CARGO_HTTP_MULTIPLEXING=false#g' "${TMP_DOCKERFILE}"
+
+# Add bounded retries around cargo build commands.
+sed -i 's#cargo build --release --no-default-features --target aarch64-unknown-linux-gnu;#for i in 1 2 3 4 5; do cargo build --release --no-default-features --target aarch64-unknown-linux-gnu \&\& break; if [ \$i -eq 5 ]; then exit 1; fi; echo "cargo retry \$i\/5 (candle arm64)"; sleep \$((i*10)); done;#g' "${TMP_DOCKERFILE}"
+sed -i 's#cargo build --release --no-default-features;#for i in 1 2 3 4 5; do cargo build --release --no-default-features \&\& break; if [ \$i -eq 5 ]; then exit 1; fi; echo "cargo retry \$i\/5 (candle amd64)"; sleep \$((i*10)); done;#g' "${TMP_DOCKERFILE}"
+sed -i 's#cargo build --release --target aarch64-unknown-linux-gnu;#for i in 1 2 3 4 5; do cargo build --release --target aarch64-unknown-linux-gnu \&\& break; if [ \$i -eq 5 ]; then exit 1; fi; echo "cargo retry \$i\/5 (rust arm64)"; sleep \$((i*10)); done;#g' "${TMP_DOCKERFILE}"
+sed -i 's#cargo build --release;#for i in 1 2 3 4 5; do cargo build --release \&\& break; if [ \$i -eq 5 ]; then exit 1; fi; echo "cargo retry \$i\/5 (rust amd64)"; sleep \$((i*10)); done;#g' "${TMP_DOCKERFILE}"
+sed -i 's#OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu \\#OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu; \\#g' "${TMP_DOCKERFILE}"
+
 # Final runtime stage apt mirror + leaner package set.
 sed -i '0,/RUN set -eux; \\/s#RUN set -eux; \\#RUN set -eux; \\\n    sed -i "s|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g" /etc/apt/sources.list.d/debian.sources || true; \\#' "${TMP_DOCKERFILE}"
 sed -i '/^[[:space:]]*docker\.io;[[:space:]]*\\$/d' "${TMP_DOCKERFILE}"
@@ -53,13 +71,16 @@ sed -i '/\/app\/bench\/requirements.txt/d' "${TMP_DOCKERFILE}"
 sed -i '/\/app\/src\/training\/model_eval\/requirements.txt/d' "${TMP_DOCKERFILE}"
 sed -i 's#pip install \$PIP_EXTRA --no-cache-dir -r requirements.txt && \\#pip install \$PIP_EXTRA --no-cache-dir -r requirements.txt#' "${TMP_DOCKERFILE}"
 
+# Harden pip install against slow/unstable links in weak-network environments.
+sed -i 's#pip install \$PIP_EXTRA --no-cache-dir -r requirements.txt#pip install \$PIP_EXTRA --no-cache-dir --retries 20 --timeout 120 --default-timeout 120 -i https:\/\/pypi.tuna.tsinghua.edu.cn\/simple --trusted-host pypi.tuna.tsinghua.edu.cn -r requirements.txt#' "${TMP_DOCKERFILE}"
+
 echo "[2/5] Stop duplicate builds (if any)"
 pkill -f "docker build .*${IMAGE}.*${TMP_DOCKERFILE}" || true
 pkill -f "docker-buildx buildx build .*${IMAGE}.*${TMP_DOCKERFILE}" || true
 
 echo "[3/5] Build local image: ${IMAGE}"
 cd "${REPO_ROOT}"
-docker build --network host --progress=plain -t "${IMAGE}" -f "${TMP_DOCKERFILE}" .
+docker build --network host --progress=plain --build-arg GIT_SSL_NO_VERIFY=1 -t "${IMAGE}" -f "${TMP_DOCKERFILE}" .
 
 echo "[4/5] Verify image exists"
 docker image inspect "${IMAGE}" >/dev/null

@@ -157,6 +157,13 @@ func (r *OpenAIRouter) updateResponseCache(ctx *RequestContext, responseBody []b
 		return
 	}
 
+	// Only cache successful upstream responses to avoid poisoning cache with error pages.
+	if ctx.UpstreamStatusCode != 0 && (ctx.UpstreamStatusCode < 200 || ctx.UpstreamStatusCode >= 300) {
+		logging.Infof("Skipping cache write for request ID %s: upstream status=%d", ctx.RequestID, ctx.UpstreamStatusCode)
+		metrics.RecordCacheWriteSkipped("upstream_non_2xx")
+		return
+	}
+
 	// Skip cache store if a decision was selected but doesn't have semantic-cache enabled
 	if ctx.VSRSelectedDecisionName != "" && r.Config != nil &&
 		!r.Config.IsCacheEnabledForDecision(ctx.VSRSelectedDecisionName) {

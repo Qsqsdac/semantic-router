@@ -42,6 +42,7 @@ type RequestContext struct {
 	// Streaming detection
 	ExpectStreamingResponse bool // set from request Accept header or stream parameter
 	IsStreamingResponse     bool // set from response Content-Type
+	UpstreamStatusCode      int  // set from response :status header
 
 	// Semi-streaming body handler (non-nil when Envoy sends STREAMED body chunks)
 	StreamedBody *StreamedBodyHandler
