@@ -72,3 +72,7 @@ global:
           intent_fasttext_binary_path: /app/intent-assets/bin/fasttext.real
           intent_fasttext_threshold: 0.6
           intent_fasttext_timeout_seconds: 2
+  stores:
+    semantic_cache:
+      enabled: false
+      
