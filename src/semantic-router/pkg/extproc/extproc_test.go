@@ -2371,7 +2371,7 @@ func TestVSRHeadersNotAddedOnCacheHit(t *testing.T) {
 	assert.Nil(t, headerMutation, "HeaderMutation should be nil for cache hit")
 }
 
-func TestVSRHeadersNotAddedOnErrorResponse(t *testing.T) {
+func TestVSRHeadersAddedOnErrorResponse(t *testing.T) {
 	// Create a mock router
 	router := &OpenAIRouter{}
 
@@ -2402,9 +2402,17 @@ func TestVSRHeadersNotAddedOnErrorResponse(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, response)
 
-	// Verify VSR headers were NOT added due to error status
+	// Verify VSR headers are added even on error status
 	headerMutation := response.GetResponseHeaders().GetResponse().GetHeaderMutation()
-	assert.Nil(t, headerMutation, "HeaderMutation should be nil for error response")
+	assert.NotNil(t, headerMutation, "HeaderMutation should not be nil for error response")
+
+	headerMap := make(map[string]string)
+	for _, header := range headerMutation.GetSetHeaders() {
+		headerMap[header.Header.Key] = string(header.Header.RawValue)
+	}
+	assert.Equal(t, "math", headerMap["x-vsr-selected-category"])
+	assert.Equal(t, "on", headerMap["x-vsr-selected-reasoning"])
+	assert.Equal(t, "deepseek-v31", headerMap["x-vsr-selected-model"])
 }
 
 func TestVSRHeadersPartialInformation(t *testing.T) {

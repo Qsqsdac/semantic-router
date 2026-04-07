@@ -73,9 +73,8 @@ func (builder *responseHeaderMutationBuilder) mutation() *ext_proc.HeaderMutatio
 
 func buildResponseHeaderMutation(
 	ctx *RequestContext,
-	isSuccessful bool,
 ) *ext_proc.HeaderMutation {
-	if ctx == nil || !isSuccessful || ctx.VSRCacheHit {
+	if ctx == nil || ctx.VSRCacheHit {
 		return nil
 	}
 
