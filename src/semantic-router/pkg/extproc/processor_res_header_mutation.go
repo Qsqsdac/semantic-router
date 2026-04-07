@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	ext_proc "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
@@ -78,6 +79,13 @@ func buildResponseHeaderMutation(
 	if ctx == nil || !isSuccessful || ctx.VSRCacheHit {
 		return nil
 	}
+	if ctx.VSRTotalRoutingLatencyMs <= 0 && !ctx.ProcessingStartTime.IsZero() {
+		elapsedMs := time.Since(ctx.ProcessingStartTime).Milliseconds()
+		if elapsedMs <= 0 {
+			elapsedMs = 1
+		}
+		ctx.VSRTotalRoutingLatencyMs = int(elapsedMs)
+	}
 
 	builder := newResponseHeaderMutationBuilder()
 	builder.addString(headers.VSRSelectedCategory, ctx.VSRSelectedCategory)
@@ -92,6 +100,7 @@ func buildResponseHeaderMutation(
 	}
 	builder.addString(headers.VSRSelectedReasoning, ctx.VSRReasoningMode)
 	builder.addString(headers.VSRSelectedModel, ctx.VSRSelectedModel)
+	builder.addInt(headers.VSRTotalRoutingLatencyMs, ctx.VSRTotalRoutingLatencyMs)
 	builder.addBool(headers.VSRInjectedSystemPrompt, ctx.VSRInjectedSystemPrompt)
 	builder.addJoined(headers.VSRMatchedKeywords, ctx.VSRMatchedKeywords)
 	builder.addJoined(headers.VSRMatchedEmbeddings, ctx.VSRMatchedEmbeddings)

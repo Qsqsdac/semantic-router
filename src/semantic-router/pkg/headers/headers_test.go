@@ -18,6 +18,7 @@ func TestHeaderConstants(t *testing.T) {
 		{"VSRSelectedCategory", VSRSelectedCategory, "x-vsr-selected-category"},
 		{"VSRSelectedReasoning", VSRSelectedReasoning, "x-vsr-selected-reasoning"},
 		{"VSRSelectedModel", VSRSelectedModel, "x-vsr-selected-model"},
+		{"VSRTotalRoutingLatencyMs", VSRTotalRoutingLatencyMs, "x-vsr-total-routing-latency-ms"},
 		{"VSRInjectedSystemPrompt", VSRInjectedSystemPrompt, "x-vsr-injected-system-prompt"},
 		{"VSRCacheHit", VSRCacheHit, "x-vsr-cache-hit"},
 		// Legacy security headers (kept for backward compatibility)

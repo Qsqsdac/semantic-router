@@ -121,6 +121,13 @@ func (r *OpenAIRouter) performCacheLookup(
 	} else if found {
 		// Mark this request as a cache hit
 		ctx.VSRCacheHit = true
+		if ctx.VSRTotalRoutingLatencyMs <= 0 && !ctx.ProcessingStartTime.IsZero() {
+			elapsedMs := time.Since(ctx.ProcessingStartTime).Milliseconds()
+			if elapsedMs <= 0 {
+				elapsedMs = 1
+			}
+			ctx.VSRTotalRoutingLatencyMs = int(elapsedMs)
+		}
 
 		// Set VSR decision context even for cache hits so headers are populated
 		// The categoryName passed here is the decision name from classification
@@ -145,7 +152,7 @@ func (r *OpenAIRouter) performCacheLookup(
 			"threshold":  threshold,
 		})
 		// Return immediate response from cache
-		response := http.CreateCacheHitResponse(cachedResponse, ctx.ExpectStreamingResponse, categoryName, ctx.VSRSelectedDecisionName, ctx.VSRMatchedKeywords)
+		response := http.CreateCacheHitResponse(cachedResponse, ctx.ExpectStreamingResponse, categoryName, ctx.VSRSelectedDecisionName, ctx.VSRMatchedKeywords, ctx.VSRTotalRoutingLatencyMs)
 		r.updateRouterReplayStatus(ctx, 200, ctx.ExpectStreamingResponse)
 		r.attachRouterReplayResponse(ctx, cachedResponse, true)
 		ctx.TraceContext = spanCtx

@@ -38,7 +38,7 @@ func TestCreateCacheHitResponse_NonStreaming(t *testing.T) {
 	}
 
 	// Test non-streaming response
-	response := CreateCacheHitResponse(cachedResponse, false, "math", "math_decision", nil)
+	response := CreateCacheHitResponse(cachedResponse, false, "math", "math_decision", nil, 25)
 
 	// Verify response structure
 	if response == nil {
@@ -58,12 +58,16 @@ func TestCreateCacheHitResponse_NonStreaming(t *testing.T) {
 	// Verify content-type header
 	var contentType string
 	var cacheHit string
+	var totalRoutingLatency string
 	for _, header := range immediateResp.Headers.SetHeaders {
 		if header.Header.Key == "content-type" {
 			contentType = string(header.Header.RawValue)
 		}
 		if header.Header.Key == "x-vsr-cache-hit" {
 			cacheHit = string(header.Header.RawValue)
+		}
+		if header.Header.Key == "x-vsr-total-routing-latency-ms" {
+			totalRoutingLatency = string(header.Header.RawValue)
 		}
 	}
 
@@ -73,6 +77,9 @@ func TestCreateCacheHitResponse_NonStreaming(t *testing.T) {
 
 	if cacheHit != "true" {
 		t.Errorf("Expected x-vsr-cache-hit true, got %s", cacheHit)
+	}
+	if totalRoutingLatency != "25" {
+		t.Errorf("Expected x-vsr-total-routing-latency-ms 25, got %s", totalRoutingLatency)
 	}
 
 	// Verify body can be parsed as JSON
@@ -139,7 +146,7 @@ func TestCreateCacheHitResponse_Streaming(t *testing.T) {
 	}
 
 	// Test streaming response
-	response := CreateCacheHitResponse(cachedResponse, true, "math", "math_decision", nil)
+	response := CreateCacheHitResponse(cachedResponse, true, "math", "math_decision", nil, 25)
 
 	// Verify response structure
 	if response == nil {
@@ -159,12 +166,16 @@ func TestCreateCacheHitResponse_Streaming(t *testing.T) {
 	// Verify content-type header
 	var contentType string
 	var cacheHit string
+	var totalRoutingLatency string
 	for _, header := range immediateResp.Headers.SetHeaders {
 		if header.Header.Key == "content-type" {
 			contentType = string(header.Header.RawValue)
 		}
 		if header.Header.Key == "x-vsr-cache-hit" {
 			cacheHit = string(header.Header.RawValue)
+		}
+		if header.Header.Key == "x-vsr-total-routing-latency-ms" {
+			totalRoutingLatency = string(header.Header.RawValue)
 		}
 	}
 
@@ -174,6 +185,9 @@ func TestCreateCacheHitResponse_Streaming(t *testing.T) {
 
 	if cacheHit != "true" {
 		t.Errorf("Expected x-vsr-cache-hit true, got %s", cacheHit)
+	}
+	if totalRoutingLatency != "25" {
+		t.Errorf("Expected x-vsr-total-routing-latency-ms 25, got %s", totalRoutingLatency)
 	}
 
 	// Verify body is in SSE format
@@ -307,7 +321,7 @@ func TestCreateCacheHitResponse_StreamingWithInvalidJSON(t *testing.T) {
 	// Test with invalid JSON
 	invalidJSON := []byte("invalid json")
 
-	response := CreateCacheHitResponse(invalidJSON, true, "other", "other_decision", nil)
+	response := CreateCacheHitResponse(invalidJSON, true, "other", "other_decision", nil, 25)
 
 	// Verify response structure
 	if response == nil {
@@ -334,7 +348,7 @@ func TestCreateCacheHitResponse_StreamingWithErrorResponse(t *testing.T) {
 	// Test with cached error response (e.g., from upstream LLM error)
 	errorResponse := []byte(`{"error": {"message": "temperature must be > 0"}, "detail": "Validation error"}`)
 
-	response := CreateCacheHitResponse(errorResponse, true, "math", "math_decision", nil)
+	response := CreateCacheHitResponse(errorResponse, true, "math", "math_decision", nil, 25)
 
 	if response == nil {
 		t.Fatal("Response is nil")
@@ -387,7 +401,7 @@ func TestCreateCacheHitResponse_StreamingWithEmptyContent(t *testing.T) {
 		t.Fatalf("Failed to marshal cached response: %v", err)
 	}
 
-	response := CreateCacheHitResponse(cachedResponse, true, "math", "math_decision", nil)
+	response := CreateCacheHitResponse(cachedResponse, true, "math", "math_decision", nil, 25)
 
 	immediateResp := response.GetImmediateResponse()
 	bodyStr := string(immediateResp.Body)
@@ -418,7 +432,7 @@ func TestCreateCacheHitResponse_StreamingWithEmptyChoices(t *testing.T) {
 		t.Fatalf("Failed to marshal cached response: %v", err)
 	}
 
-	response := CreateCacheHitResponse(cachedResponse, true, "math", "math_decision", nil)
+	response := CreateCacheHitResponse(cachedResponse, true, "math", "math_decision", nil, 25)
 
 	immediateResp := response.GetImmediateResponse()
 	bodyStr := string(immediateResp.Body)
@@ -464,7 +478,7 @@ func TestCreateCacheHitResponse_StreamingWithWhitespaceContent(t *testing.T) {
 		t.Fatalf("Failed to marshal cached response: %v", err)
 	}
 
-	response := CreateCacheHitResponse(cachedResponse, true, "math", "math_decision", nil)
+	response := CreateCacheHitResponse(cachedResponse, true, "math", "math_decision", nil, 25)
 
 	immediateResp := response.GetImmediateResponse()
 	bodyStr := string(immediateResp.Body)
@@ -501,7 +515,7 @@ func TestCreateCacheHitResponse_StreamingWithLongContent(t *testing.T) {
 		t.Fatalf("Failed to marshal cached response: %v", err)
 	}
 
-	response := CreateCacheHitResponse(cachedResponse, true, "math", "math_decision", nil)
+	response := CreateCacheHitResponse(cachedResponse, true, "math", "math_decision", nil, 25)
 
 	immediateResp := response.GetImmediateResponse()
 	bodyStr := string(immediateResp.Body)

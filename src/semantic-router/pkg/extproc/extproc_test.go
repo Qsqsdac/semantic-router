@@ -2287,6 +2287,7 @@ func TestVSRHeadersAddedOnSuccessfulNonCachedResponse(t *testing.T) {
 		VSRSelectedCategory:     "math",
 		VSRReasoningMode:        "on",
 		VSRSelectedModel:        "deepseek-v31",
+		VSRTotalRoutingLatencyMs: 42,
 		VSRCacheHit:             false, // Not a cache hit
 		VSRInjectedSystemPrompt: true,  // System prompt was injected
 	}
@@ -2319,7 +2320,7 @@ func TestVSRHeadersAddedOnSuccessfulNonCachedResponse(t *testing.T) {
 	assert.NotNil(t, headerMutation, "HeaderMutation should not be nil for successful non-cached response")
 
 	setHeaders := headerMutation.GetSetHeaders()
-	assert.Len(t, setHeaders, 4, "Should have 4 VSR headers")
+	assert.Len(t, setHeaders, 6, "Should have 6 VSR headers")
 
 	// Verify each header
 	headerMap := make(map[string]string)
@@ -2330,6 +2331,7 @@ func TestVSRHeadersAddedOnSuccessfulNonCachedResponse(t *testing.T) {
 	assert.Equal(t, "math", headerMap["x-vsr-selected-category"])
 	assert.Equal(t, "on", headerMap["x-vsr-selected-reasoning"])
 	assert.Equal(t, "deepseek-v31", headerMap["x-vsr-selected-model"])
+	assert.Equal(t, "42", headerMap["x-vsr-total-routing-latency-ms"])
 	assert.Equal(t, "true", headerMap["x-vsr-injected-system-prompt"])
 }
 

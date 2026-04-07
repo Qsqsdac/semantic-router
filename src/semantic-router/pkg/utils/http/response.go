@@ -74,8 +74,8 @@ func splitContentIntoChunks(content string) []string {
 	return chunks
 }
 
-// CreateCacheHitResponse creates an immediate response from cache
-func CreateCacheHitResponse(cachedResponse []byte, isStreaming bool, category string, decisionName string, matchedKeywords []string) *ext_proc.ProcessingResponse {
+// CreateCacheHitResponse creates an immediate response from cache.
+func CreateCacheHitResponse(cachedResponse []byte, isStreaming bool, category string, decisionName string, matchedKeywords []string, totalRoutingLatencyMs int) *ext_proc.ProcessingResponse {
 	var responseBody []byte
 	var contentType string
 
@@ -251,6 +251,12 @@ func CreateCacheHitResponse(cachedResponse []byte, isStreaming bool, category st
 			Header: &core.HeaderValue{
 				Key:      headers.VSRCacheHit,
 				RawValue: []byte("true"),
+			},
+		},
+		{
+			Header: &core.HeaderValue{
+				Key:      headers.VSRTotalRoutingLatencyMs,
+				RawValue: []byte(fmt.Sprintf("%d", totalRoutingLatencyMs)),
 			},
 		},
 		{

@@ -50,6 +50,10 @@ const (
 	// Example values: "deepseek-v31", "phi4", "gpt-4"
 	VSRSelectedModel = "x-vsr-selected-model"
 
+	// VSRTotalRoutingLatencyMs indicates total router latency including semantic-cache lookup.
+	// Value: positive integer milliseconds (e.g., "12")
+	VSRTotalRoutingLatencyMs = "x-vsr-total-routing-latency-ms"
+
 	// VSRInjectedSystemPrompt indicates whether a system prompt was injected into the request.
 	// Values: "true" or "false"
 	VSRInjectedSystemPrompt = "x-vsr-injected-system-prompt"
