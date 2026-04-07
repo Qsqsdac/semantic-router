@@ -65,7 +65,7 @@ type RequestContext struct {
 	VSRReasoningMode              string           // "on" or "off" - whether reasoning mode was determined to be used
 	VSRSelectedModel              string           // The model selected by VSR
 	VSRSelectionMethod            string           // Model selection algorithm used (e.g., "elo", "static", "router_dc")
-	VSRTotalRoutingLatencyMs      int              // Total routing time including semantic cache (milliseconds)
+	VSRTotalRoutingLatencyMs      int              // Routing-stage latency until decision/cache completes and request is ready to forward (milliseconds)
 	VSRCacheHit                   bool             // Whether this request hit the cache
 	VSRInjectedSystemPrompt       bool             // Whether a system prompt was injected into the request
 	VSRSelectedDecision           *config.Decision // The decision object selected by DecisionEngine (for plugins)

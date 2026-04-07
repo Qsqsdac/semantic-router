@@ -122,6 +122,7 @@ func (r *OpenAIRouter) handleModelRouting(openAIRequest *openai.ChatCompletionNe
 	default:
 		// Auto model without selection - no routing needed
 		ctx.RequestModel = originalModel
+		r.recordRoutingLatency(ctx)
 		return response, nil
 	}
 }

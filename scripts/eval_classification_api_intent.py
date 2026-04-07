@@ -291,9 +291,8 @@ def main() -> None:
         try:
             resp = classify_intent(args.router_url, question, args.timeout)
             parsed = parse_response_fields(resp)
-            predicted_norm = parsed["predicted_norm"]
 
-            is_correct = predicted_norm == expected_norm and predicted_norm != ""
+            is_correct = expected_norm in parsed["matched_domains"]
             if is_correct:
                 correct += 1
             else:

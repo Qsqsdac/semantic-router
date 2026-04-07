@@ -180,6 +180,7 @@ func (r *OpenAIRouter) handleLooperInternalRequest(
 	}
 
 	setHeaders := []*core.HeaderValueOption{newHeaderValueOption(headers.VSRSelectedModel, modelName)}
+	r.recordRoutingLatency(ctx)
 	return buildLooperContinueResponse(modifiedBody, setHeaders, nil), nil
 }
 
@@ -221,6 +222,7 @@ func (r *OpenAIRouter) handleLooperInternalRequestWithPlugins(
 
 	setHeaders, removeHeaders := r.buildHeaderMutationsForLooper(decision, modelName)
 	r.startLooperInternalReplay(ctx, modelName, decisionName)
+	r.recordRoutingLatency(ctx)
 	return buildLooperContinueResponse(modifiedBody, setHeaders, removeHeaders), nil
 }
 

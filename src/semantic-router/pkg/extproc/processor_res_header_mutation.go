@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	ext_proc "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
@@ -78,13 +77,6 @@ func buildResponseHeaderMutation(
 ) *ext_proc.HeaderMutation {
 	if ctx == nil || !isSuccessful || ctx.VSRCacheHit {
 		return nil
-	}
-	if ctx.VSRTotalRoutingLatencyMs <= 0 && !ctx.ProcessingStartTime.IsZero() {
-		elapsedMs := time.Since(ctx.ProcessingStartTime).Milliseconds()
-		if elapsedMs <= 0 {
-			elapsedMs = 1
-		}
-		ctx.VSRTotalRoutingLatencyMs = int(elapsedMs)
 	}
 
 	builder := newResponseHeaderMutationBuilder()
