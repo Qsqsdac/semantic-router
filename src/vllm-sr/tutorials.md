@@ -9,11 +9,25 @@ VLLM_SR_STACK_NAME=lane-b VLLM_SR_PORT_OFFSET=200 vllm-sr stop
 
 # 意图分类测试
 
+## 测试配置
+使用 [config/unit_test/intent_test.yaml](../config/unit_test/intent_test.yaml) 作为意图分类专用单元测试配置。
+
 ## 单次测试
 curl -X POST http://localhost:8280/api/v1/classify/intent   -H "Content-Type: application/json"   -d '{"text": "what is cad?"}'
 
 ## 脚本
 python ../../scripts/eval_classification_api_intent.py --router-url http://localhost:8280 --max-samples 1000
+
+# jailbreak 测试
+
+## 测试配置
+使用 [config/unit_test/jailbreak_test.yaml](../config/unit_test/jailbreak_test.yaml) 作为 jailbreak 专用单元测试配置。
+
+## 单次测试
+curl -X POST http://localhost:8280/api/v1/classify/security   -H "Content-Type: application/json"   -d '{"text": "what is cad?"}'
+
+## 脚本
+python ../../scripts/eval_jailbreak_api.py --router-url http://localhost:8280 --max-samples 1000 --workers 4
 
 # 端到端测试
 curl -v http://localhost:9099/v1/chat/completions -H "Content-Type: application/json" -H "Authorization: Bearer sk-123456" -d '{ "model": "MoM", "messages": [{"role": "user", "content": "What is the derivative of x^2?"}], "reasoning_effort": "none"}'

@@ -10,6 +10,7 @@
 | mmlu-prox-<lang> | 领域分类评测（多语言） | li-lab/MMLU-ProX | `load_dataset("li-lab/MMLU-ProX", "zh", split="test")`（语言代码替换） |
 | fact-check-en | 事实核查信号评测 | llm-semantic-router/fact-check-classification-dataset | `load_dataset("llm-semantic-router/fact-check-classification-dataset", split="test")` |
 | feedback-en | 用户反馈信号评测 | llm-semantic-router/feedback-detector-dataset | `load_dataset("llm-semantic-router/feedback-detector-dataset", split="validation")` |
+| jailbreak-en | 越狱/提示注入信号评测 | llm-semantic-router/jailbreak-detection-dataset | `load_dataset("llm-semantic-router/jailbreak-detection-dataset", split="test")` |
 
 参考实现：
 - `src/training/model_eval/signal_eval.py`
@@ -56,6 +57,31 @@ curl -L -o presidio_synth_dataset_v2.json \
 
 参考实现：
 - `src/training/model_classifier/pii_model_fine_tuning_lora/pii_bert_finetuning_lora.py`
+
+### Jailbreak 检测
+
+- `llm-semantic-router/jailbreak-detection-dataset`（评测与模型对齐常用）
+- `lmsys/toxic-chat`（训练）
+- `OpenSafetyLab/Salad-Data`（训练）
+- `jackhhao/jailbreak-classification`（多任务训练实验）
+
+获取：
+
+```python
+from datasets import load_dataset
+load_dataset("llm-semantic-router/jailbreak-detection-dataset", split="test")
+load_dataset("lmsys/toxic-chat", "toxicchat0124")
+load_dataset("OpenSafetyLab/Salad-Data", "attack_enhanced_set")
+load_dataset("jackhhao/jailbreak-classification")
+```
+
+本地 e2e 用例集：
+- `e2e/testcases/testdata/jailbreak_detection_cases.json`
+
+参考实现：
+- `src/training/model_eval/constants.py`
+- `src/training/model_classifier/prompt_guard_fine_tuning_lora/jailbreak_bert_finetuning_lora.py`
+- `src/training/model_experiment/multitask_bert_fine_tuning/multitask_bert_training.py`
 
 ## 3. 幻觉评测（bench/hallucination）
 
@@ -115,6 +141,9 @@ huggingface-cli download vllm-project/semantic-router-benchmark \
 | li-lab/MMLU-ProX | 路由 domain 信号（多语言） | 评测 | 当前主要用于多语言评测，不是主训练集。 |
 | llm-semantic-router/fact-check-classification-dataset | 路由 fact_check 信号 | 评测 | 用于 fact-check 信号评测与回归检查。 |
 | llm-semantic-router/feedback-detector-dataset | mmbert32k-feedback-detector | 训练 + 评测 | 反馈分类器训练默认数据源，也用于信号评测。 |
+| llm-semantic-router/jailbreak-detection-dataset | mmbert32k-jailbreak-detector | 评测（主）+ 训练对齐 | 越狱/提示注入检测的标准评测集（safe/unsafe）。 |
+| lmsys/toxic-chat + OpenSafetyLab/Salad-Data | jailbreak LoRA 训练脚本 | 训练 | 组合训练集：通用有害对话 + 越狱攻击样本，提升覆盖率。 |
+| jackhhao/jailbreak-classification | 多任务训练实验（含 jailbreak 头） | 训练（实验） | 在 multitask 训练脚本中作为 jailbreak 分类数据源。 |
 | pminervini/HaluEval | 幻觉检测基准；fact-check 数据构造 | 评测 + 训练辅助 | 在 hallucination benchmark 中直接评测；也被 fact-check 训练脚本用作问题来源之一。 |
 | PatronusAI/financebench | 幻觉检测基准 | 评测 | 用于 hallucination benchmark 的金融场景评测。 |
 | vllm-project/semantic-router-benchmark | ML model selection 模型 | 训练 | 作为训练样本，学习 query 到最优模型选择策略。 |
