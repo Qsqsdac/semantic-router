@@ -178,6 +178,10 @@ type PromptGuardConfig struct {
 	EarlyExitEnabled     bool    `yaml:"early_exit_enabled,omitempty"`
 	EarlyExitLayers      []int   `yaml:"early_exit_layers,omitempty"`
 	EarlyExitConfidence  float32 `yaml:"early_exit_confidence,omitempty"`
+	PromptCropEnabled    bool    `yaml:"prompt_crop_enabled,omitempty"`
+	PromptCropMaxChars   int     `yaml:"prompt_crop_max_chars,omitempty"`
+	PromptCropHeadChars  int     `yaml:"prompt_crop_head_chars,omitempty"`
+	PromptCropTailChars  int     `yaml:"prompt_crop_tail_chars,omitempty"`
 	JailbreakMappingPath string  `yaml:"jailbreak_mapping_path"`
 	UseVLLM              bool    `yaml:"use_vllm,omitempty"`
 }

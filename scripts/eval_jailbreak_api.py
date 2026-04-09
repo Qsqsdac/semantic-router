@@ -216,11 +216,23 @@ def parse_response_fields(resp: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _sanitize_jsonl_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.translate({0x2028: " ", 0x2029: " ", 0x0085: " "})
+    if isinstance(value, dict):
+        return {key: _sanitize_jsonl_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_jsonl_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_jsonl_value(item) for item in value)
+    return value
+
+
 def write_jsonl(path: Path, rows: List[Dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
+    with path.open("w", encoding="utf-8", newline="\n") as f:
         for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            f.write(json.dumps(_sanitize_jsonl_value(row), ensure_ascii=False) + "\n")
 
 
 def compute_percentile(values: List[float], percentile: float) -> Optional[float]:
@@ -459,14 +471,6 @@ def main() -> None:
         "jailbreak_recall": jailbreak_recall,
         "jailbreak_precision": jailbreak_precision,
         "false_positive_rate": false_positive_rate,
-        "expected_positive": expected_positive,
-        "expected_negative": expected_negative,
-        "predicted_positive": predicted_positive,
-        "predicted_negative": predicted_negative,
-        "true_positive": true_positive,
-        "true_negative": true_negative,
-        "false_positive": false_positive,
-        "false_negative": false_negative,
         "avg_api_latency_ms": avg_api_latency_ms,
         "avg_processing_time_ms": avg_processing_time_ms,
         "p50_api_latency_ms": compute_percentile(api_latencies, 50),

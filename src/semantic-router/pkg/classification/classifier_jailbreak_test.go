@@ -2,6 +2,7 @@ package classification
 
 import (
 	"errors"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -18,6 +19,7 @@ type MockJailbreakInferenceResponse struct {
 type MockJailbreakInference struct {
 	MockJailbreakInferenceResponse
 	responseMap map[string]MockJailbreakInferenceResponse
+	lastText    string
 }
 
 func (m *MockJailbreakInference) setMockResponse(text string, class int, confidence float32, err error) {
@@ -31,6 +33,7 @@ func (m *MockJailbreakInference) setMockResponse(text string, class int, confide
 }
 
 func (m *MockJailbreakInference) Classify(text string) (candle_binding.ClassResult, error) {
+	m.lastText = text
 	if response, exists := m.responseMap[text]; exists {
 		return response.classifyResult, response.classifyError
 	}
@@ -207,6 +210,20 @@ var _ = Describe("jailbreak detection classification", func() {
 		Expect(isJailbreak).To(BeFalse())
 		Expect(jailbreakType).To(Equal(""))
 		Expect(confidence).To(BeNumerically("~", 0.0, 0.001))
+	})
+
+	It("should crop long prompts from both ends before inference", func() {
+		classifier.Config.PromptGuard.PromptCropEnabled = true
+		classifier.Config.PromptGuard.PromptCropMaxChars = 10
+		classifier.Config.PromptGuard.PromptCropHeadChars = 4
+		classifier.Config.PromptGuard.PromptCropTailChars = 4
+		mockModel.classifyResult = candle_binding.ClassResult{Class: 0, Confidence: 0.9}
+
+		longText := strings.Repeat("x", 20)
+		_, _, _, err := classifier.CheckForJailbreak(longText)
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(mockModel.lastText).To(Equal("xxxx\nxxxx"))
 	})
 
 	It("should fail when the predicted class is unknown", func() {

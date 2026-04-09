@@ -207,9 +207,17 @@ type MmBERT32KJailbreakInferenceImpl struct {
 	earlyExitEnabled    bool
 	earlyExitLayers     []int
 	earlyExitConfidence float32
+	promptCropEnabled   bool
+	promptCropMaxChars  int
+	promptCropHeadChars int
+	promptCropTailChars int
 }
 
 func (c *MmBERT32KJailbreakInferenceImpl) Classify(text string) (candle_binding.ClassResult, error) {
+	if c.promptCropEnabled {
+		text = cropJailbreakPrompt(text, c.promptCropMaxChars, c.promptCropHeadChars, c.promptCropTailChars)
+	}
+
 	if c.earlyExitEnabled {
 		return candle_binding.ClassifyMmBert32KJailbreakWithEarlyExit(
 			text,
@@ -240,7 +248,73 @@ func createMmBERT32KJailbreakInference(promptGuardCfg *config.PromptGuardConfig)
 		earlyExitEnabled:    promptGuardCfg.EarlyExitEnabled,
 		earlyExitLayers:     layers,
 		earlyExitConfidence: confidence,
+		promptCropEnabled:   promptGuardCfg.PromptCropEnabled,
+		promptCropMaxChars:  promptGuardCfg.PromptCropMaxChars,
+		promptCropHeadChars: promptGuardCfg.PromptCropHeadChars,
+		promptCropTailChars: promptGuardCfg.PromptCropTailChars,
 	}
+}
+
+func cropJailbreakPrompt(text string, maxChars int, headChars int, tailChars int) string {
+	runes := []rune(text)
+	if maxChars <= 0 || len(runes) <= maxChars {
+		return text
+	}
+	if maxChars <= 1 {
+		return string(runes[:1])
+	}
+
+	budget := maxChars - 1
+	headChars, tailChars = normalizeJailbreakCropBudget(budget, headChars, tailChars)
+	if headChars+tailChars >= len(runes) {
+		return text
+	}
+
+	start := string(runes[:headChars])
+	end := string(runes[len(runes)-tailChars:])
+	cropped := start + "\n" + end
+	logging.Debugf("Jailbreak prompt cropped: %d -> %d runes (head=%d, tail=%d)", len(runes), len([]rune(cropped)), headChars, tailChars)
+
+	return cropped
+}
+
+func normalizeJailbreakCropBudget(maxChars int, headChars int, tailChars int) (int, int) {
+	if maxChars <= 0 {
+		return 0, 0
+	}
+
+	if headChars < 0 {
+		headChars = 0
+	}
+	if tailChars < 0 {
+		tailChars = 0
+	}
+
+	if headChars == 0 && tailChars == 0 {
+		headChars = maxChars / 2
+		tailChars = maxChars - headChars
+	}
+
+	if headChars+tailChars > maxChars {
+		headChars = maxChars / 2
+		tailChars = maxChars - headChars
+	}
+
+	if headChars == 0 {
+		headChars = 1
+	}
+	if tailChars == 0 && maxChars > 1 {
+		tailChars = maxChars - headChars
+	}
+
+	if headChars+tailChars > maxChars {
+		tailChars = maxChars - headChars
+	}
+	if tailChars < 0 {
+		tailChars = 0
+	}
+
+	return headChars, tailChars
 }
 
 // createJailbreakInference creates the appropriate jailbreak inference based on configuration

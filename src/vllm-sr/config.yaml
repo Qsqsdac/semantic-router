@@ -115,6 +115,10 @@ global:
         early_exit_enabled: true
         early_exit_layers: [4, 8, 12]
         early_exit_confidence: 0.8
+        prompt_crop_enabled: true
+        prompt_crop_max_chars: 1024
+        prompt_crop_head_chars: 512
+        prompt_crop_tail_chars: 512
         jailbreak_mapping_path: models/mmbert32k-jailbreak-detector-merged/jailbreak_type_mapping.json
         use_vllm: false
       prompt_compression:

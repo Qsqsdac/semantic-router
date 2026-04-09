@@ -72,7 +72,7 @@ sed -i '/\/app\/src\/training\/model_eval\/requirements.txt/d' "${TMP_DOCKERFILE
 sed -i 's#pip install \$PIP_EXTRA --no-cache-dir -r requirements.txt && \\#pip install \$PIP_EXTRA --no-cache-dir -r requirements.txt#' "${TMP_DOCKERFILE}"
 
 # Harden pip install against slow/unstable links in weak-network environments.
-sed -i 's#pip install \$PIP_EXTRA --no-cache-dir -r requirements.txt#pip install \$PIP_EXTRA --no-cache-dir --retries 20 --timeout 120 --default-timeout 120 -i https:\/\/pypi.tuna.tsinghua.edu.cn\/simple --trusted-host pypi.tuna.tsinghua.edu.cn -r requirements.txt#' "${TMP_DOCKERFILE}"
+sed -i 's#pip install \$PIP_EXTRA --no-cache-dir -r requirements.txt#pip install \$PIP_EXTRA --no-cache-dir --retries 50 --timeout 600 --default-timeout 600 --progress-bar off -i https:\/\/pypi.tuna.tsinghua.edu.cn\/simple --trusted-host pypi.tuna.tsinghua.edu.cn -r requirements.txt#' "${TMP_DOCKERFILE}"
 
 echo "[2/5] Stop duplicate builds (if any)"
 pkill -f "docker build .*${IMAGE}.*${TMP_DOCKERFILE}" || true
