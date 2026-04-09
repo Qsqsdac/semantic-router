@@ -284,6 +284,7 @@ extern ModernBertClassificationResult classify_feedback_text(const char* text);
 extern ModernBertClassificationResult classify_mmbert_32k_intent(const char* text);
 extern ModernBertClassificationResult classify_mmbert_32k_factcheck(const char* text);
 extern ModernBertClassificationResult classify_mmbert_32k_jailbreak(const char* text);
+extern ModernBertClassificationResult classify_mmbert_32k_jailbreak_with_early_exit(const char* text, const int* early_exit_layers, int num_layers, float confidence_threshold);
 extern ModernBertClassificationResult classify_mmbert_32k_feedback(const char* text);
 extern ModernBertTokenClassificationResult classify_mmbert_32k_pii_tokens(const char* text);
 extern ModernBertClassificationResult classify_mmbert_32k_modality(const char* text);
@@ -2456,6 +2457,43 @@ func ClassifyMmBert32KJailbreak(text string) (ClassResult, error) {
 
 	if result.class < 0 {
 		return ClassResult{}, fmt.Errorf("failed to classify jailbreak with mmBERT-32K")
+	}
+
+	return ClassResult{
+		Class:      int(result.class),
+		Confidence: float32(result.confidence),
+	}, nil
+}
+
+// ClassifyMmBert32KJailbreakWithEarlyExit classifies text using mmBERT-32K jailbreak detector
+// with intermediate-layer early exit.
+//
+// earlyExitLayers is a 1-indexed layer list (e.g. []int{6, 12, 18}).
+// The model returns as soon as max probability >= confidenceThreshold on one candidate layer.
+func ClassifyMmBert32KJailbreakWithEarlyExit(text string, earlyExitLayers []int, confidenceThreshold float32) (ClassResult, error) {
+	cText := C.CString(text)
+	defer C.free(unsafe.Pointer(cText))
+
+	var cLayersPtr *C.int
+	var cNumLayers C.int
+	if len(earlyExitLayers) > 0 {
+		cLayers := make([]C.int, len(earlyExitLayers))
+		for i, layer := range earlyExitLayers {
+			cLayers[i] = C.int(layer)
+		}
+		cLayersPtr = &cLayers[0]
+		cNumLayers = C.int(len(cLayers))
+	}
+
+	result := C.classify_mmbert_32k_jailbreak_with_early_exit(
+		cText,
+		cLayersPtr,
+		cNumLayers,
+		C.float(confidenceThreshold),
+	)
+
+	if result.class < 0 {
+		return ClassResult{}, fmt.Errorf("failed to classify jailbreak with mmBERT-32K early exit")
 	}
 
 	return ClassResult{

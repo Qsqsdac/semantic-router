@@ -2192,6 +2192,69 @@ pub extern "C" fn classify_mmbert_32k_jailbreak(
     }
 }
 
+/// Classify text using mmBERT-32K jailbreak detector with intermediate-layer early exit.
+///
+/// `early_exit_layers` is a pointer to a 1-indexed layer list (e.g. [6, 12, 18]).
+/// Inference returns early if confidence >= `confidence_threshold` at any candidate layer.
+///
+/// # Safety
+/// - `text` must be a valid null-terminated C string
+/// - `early_exit_layers` may be null when `num_layers == 0`
+#[no_mangle]
+pub extern "C" fn classify_mmbert_32k_jailbreak_with_early_exit(
+    text: *const c_char,
+    early_exit_layers: *const i32,
+    num_layers: i32,
+    confidence_threshold: f32,
+) -> ModernBertClassificationResult {
+    let default_result = ModernBertClassificationResult {
+        predicted_class: -1,
+        confidence: 0.0,
+    };
+
+    let text = unsafe {
+        match CStr::from_ptr(text).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!("Failed to convert text from C string");
+                return default_result;
+            }
+        }
+    };
+
+    let layers: Vec<usize> = if num_layers > 0 && !early_exit_layers.is_null() {
+        unsafe {
+            std::slice::from_raw_parts(early_exit_layers, num_layers as usize)
+                .iter()
+                .copied()
+                .filter(|layer| *layer > 0)
+                .map(|layer| layer as usize)
+                .collect()
+        }
+    } else {
+        Vec::new()
+    };
+
+    if let Some(classifier) = MMBERT_32K_JAILBREAK_CLASSIFIER.get() {
+        match classifier.classify_text_with_early_exit(text, &layers, confidence_threshold) {
+            Ok((class_id, confidence, _layer_idx)) => ModernBertClassificationResult {
+                predicted_class: class_id as i32,
+                confidence,
+            },
+            Err(e) => {
+                eprintln!(
+                    "mmBERT-32K jailbreak early-exit classification failed: {}",
+                    e
+                );
+                default_result
+            }
+        }
+    } else {
+        eprintln!("mmBERT-32K jailbreak classifier not initialized");
+        default_result
+    }
+}
+
 /// Classify text using mmBERT-32K feedback detector
 ///
 /// Detects user satisfaction from follow-up messages.

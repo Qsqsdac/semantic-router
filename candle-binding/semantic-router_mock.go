@@ -729,6 +729,15 @@ func ClassifyMmBert32KJailbreak(text string) (ClassResult, error) {
 	return ClassResult{Class: 0, Confidence: 0.95}, nil
 }
 
+// ClassifyMmBert32KJailbreakWithEarlyExit classifies text with mmBERT-32K jailbreak classifier
+// using mock early-exit behavior.
+func ClassifyMmBert32KJailbreakWithEarlyExit(text string, earlyExitLayers []int, confidenceThreshold float32) (ClassResult, error) {
+	_ = text
+	_ = earlyExitLayers
+	_ = confidenceThreshold
+	return ClassResult{Class: 0, Confidence: 0.95}, nil
+}
+
 // InitMmBert32KFeedbackClassifier initializes mmBERT-32K feedback classifier
 func InitMmBert32KFeedbackClassifier(modelPath string, useCPU bool) error {
 	log.Printf("[MOCK] Initializing mmBERT-32K Feedback Classifier: %s", modelPath)

@@ -470,6 +470,66 @@ impl ModernBert {
         let xs = xs.apply(&self.final_norm)?;
         Ok(xs)
     }
+
+    /// Forward pass that captures normalized hidden states at selected encoder layers.
+    ///
+    /// `target_layers` is 1-indexed (e.g. 6 means "after the 6th layer").
+    /// Invalid layer indices are ignored.
+    pub fn forward_to_layers(
+        &self,
+        xs: &Tensor,
+        mask: &Tensor,
+        target_layers: &[usize],
+    ) -> Result<Vec<(usize, Tensor)>> {
+        if target_layers.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut sorted_layers: Vec<usize> = target_layers
+            .iter()
+            .copied()
+            .filter(|l| *l > 0 && *l <= self.layers.len())
+            .collect();
+        sorted_layers.sort_unstable();
+        sorted_layers.dedup();
+
+        if sorted_layers.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let seq_len = xs.shape().dims()[1];
+        let global_attention_mask =
+            prepare_4d_attention_mask(mask, DType::F32, None)?.to_device(xs.device())?;
+        let local_attention_mask =
+            get_local_attention_mask(seq_len, self.local_attention_size / 2, xs.device())?;
+
+        let mut hidden_states = xs.apply(&self.word_embeddings)?.apply(&self.norm)?;
+        let mut outputs: Vec<(usize, Tensor)> = Vec::with_capacity(sorted_layers.len());
+        let mut next_target_idx = 0usize;
+
+        for (idx, layer) in self.layers.iter().enumerate() {
+            hidden_states = layer.forward(
+                &hidden_states,
+                &global_attention_mask,
+                &local_attention_mask,
+            )?;
+            let layer_num = idx + 1;
+
+            while next_target_idx < sorted_layers.len()
+                && sorted_layers[next_target_idx] == layer_num
+            {
+                let normalized = hidden_states.apply(&self.final_norm)?;
+                outputs.push((layer_num, normalized));
+                next_target_idx += 1;
+            }
+
+            if next_target_idx >= sorted_layers.len() {
+                break;
+            }
+        }
+
+        Ok(outputs)
+    }
 }
 
 // ModernBERT for the fill-mask task

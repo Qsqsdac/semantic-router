@@ -543,6 +543,59 @@ impl std::fmt::Debug for TraditionalModernBertTokenClassifier {
 }
 
 impl TraditionalModernBertClassifier {
+    fn classify_from_hidden_states(
+        &self,
+        model_output: &Tensor,
+        attention_mask: &Tensor,
+    ) -> Result<(usize, f32), candle_core::Error> {
+        // Apply pooling strategy
+        let pooled_output = match self.classifier_pooling {
+            ClassifierPooling::CLS => {
+                // Use [CLS] token (first token)
+                model_output.i((.., 0, ..))?
+            }
+            ClassifierPooling::MEAN => {
+                // Mean pooling over sequence length
+                let model_dims = model_output.dims().len();
+                let mut mask_expanded = attention_mask.clone();
+
+                while mask_expanded.dims().len() < model_dims {
+                    mask_expanded = mask_expanded.unsqueeze(mask_expanded.dims().len())?;
+                }
+
+                let mask_expanded = mask_expanded.to_dtype(candle_core::DType::F32)?;
+                let masked_output = model_output.broadcast_mul(&mask_expanded)?;
+                let sum_output = masked_output.sum(1)?;
+                let mask_sum = attention_mask
+                    .sum_keepdim(1)?
+                    .to_dtype(candle_core::DType::F32)?;
+                sum_output.broadcast_div(&mask_sum)?
+            }
+        };
+
+        // Apply head layer if present
+        let classifier_input = if let Some(ref head) = self.head {
+            head.forward(&pooled_output)?
+        } else {
+            pooled_output
+        };
+
+        // Apply classifier to get probabilities
+        let probabilities = self.classifier.forward(&classifier_input)?;
+        let probabilities_vec = probabilities.squeeze(0)?.to_vec1::<f32>()?;
+
+        let mut max_prob = 0.0f32;
+        let mut predicted_class = 0usize;
+        for (i, &prob) in probabilities_vec.iter().enumerate() {
+            if prob > max_prob {
+                max_prob = prob;
+                predicted_class = i;
+            }
+        }
+
+        Ok((predicted_class, max_prob))
+    }
+
     /// Load ModernBERT number of classes using unified config loader
     fn load_modernbert_num_classes(model_path: &str) -> Result<usize, candle_core::Error> {
         use crate::core::config_loader;
@@ -1123,56 +1176,8 @@ impl TraditionalModernBertClassifier {
         // 3. Forward pass through ModernBERT model
         let model_output = self.model.forward(&input_ids, &attention_mask)?;
 
-        // 4. Apply pooling strategy
-        let pooled_output = match self.classifier_pooling {
-            ClassifierPooling::CLS => {
-                // Use [CLS] token (first token)
-                model_output.i((.., 0, ..))?
-            }
-            ClassifierPooling::MEAN => {
-                // Mean pooling over sequence length
-                // Ensure attention_mask has the same number of dimensions as model_output
-                let model_dims = model_output.dims().len();
-                let mut mask_expanded = attention_mask.clone();
-
-                // Add dimensions to match model_output
-                while mask_expanded.dims().len() < model_dims {
-                    mask_expanded = mask_expanded.unsqueeze(mask_expanded.dims().len())?;
-                }
-
-                let mask_expanded = mask_expanded.to_dtype(candle_core::DType::F32)?;
-                let masked_output = model_output.broadcast_mul(&mask_expanded)?;
-                let sum_output = masked_output.sum(1)?;
-                let mask_sum = attention_mask
-                    .sum_keepdim(1)?
-                    .to_dtype(candle_core::DType::F32)?;
-                sum_output.broadcast_div(&mask_sum)?
-            }
-        };
-
-        // 5. Apply head layer if present
-        let classifier_input = if let Some(ref head) = self.head {
-            let head_output = head.forward(&pooled_output)?;
-            head_output
-        } else {
-            pooled_output
-        };
-
-        // 6. Apply classifier to get probabilities (classifier applies softmax internally)
-        let probabilities = self.classifier.forward(&classifier_input)?;
-
-        // 8. Extract prediction (highest probability class)
-        let probabilities_vec = probabilities.squeeze(0)?.to_vec1::<f32>()?;
-
-        let mut max_prob = 0.0f32;
-        let mut predicted_class = 0usize;
-
-        for (i, &prob) in probabilities_vec.iter().enumerate() {
-            if prob > max_prob {
-                max_prob = prob;
-                predicted_class = i;
-            }
-        }
+        let (predicted_class, max_prob) =
+            self.classify_from_hidden_states(&model_output, &attention_mask)?;
 
         // 9. Get class label if available
         if let Some(class_labels) = self.get_class_labels() {
@@ -1182,6 +1187,65 @@ impl TraditionalModernBertClassifier {
         }
 
         Ok((predicted_class, max_prob))
+    }
+
+    /// Classify text with intermediate-layer early exit.
+    ///
+    /// `early_exit_layers` is a list of 1-indexed candidate layers to probe.
+    /// Inference stops at the first candidate layer whose max class probability
+    /// reaches `confidence_threshold`. If none reaches the threshold, returns
+    /// the final-layer prediction.
+    pub fn classify_text_with_early_exit(
+        &self,
+        text: &str,
+        early_exit_layers: &[usize],
+        confidence_threshold: f32,
+    ) -> Result<(usize, f32, usize), candle_core::Error> {
+        let tokenization_result = self.tokenizer.tokenize(text).map_err(|e| {
+            let unified_err = processing_errors::tensor_operation("tokenization", &e.to_string());
+            candle_core::Error::from(unified_err)
+        })?;
+
+        let (input_ids, attention_mask) = self
+            .tokenizer
+            .create_tensors(&tokenization_result)
+            .map_err(|e| {
+                let unified_err =
+                    processing_errors::tensor_operation("tensor creation", &e.to_string());
+                candle_core::Error::from(unified_err)
+            })?;
+
+        let mut candidate_layers: Vec<usize> = early_exit_layers
+            .iter()
+            .copied()
+            .filter(|layer| *layer > 0 && *layer <= self.config.num_hidden_layers)
+            .collect();
+        candidate_layers.sort_unstable();
+        candidate_layers.dedup();
+
+        let layer_outputs =
+            self.model
+                .forward_to_layers(&input_ids, &attention_mask, &candidate_layers)?;
+
+        if layer_outputs.is_empty() {
+            return self
+                .classify_text(text)
+                .map(|(class_id, confidence)| (class_id, confidence, self.config.num_hidden_layers));
+        }
+
+        let threshold = confidence_threshold.clamp(0.0, 1.0);
+
+        for (layer_idx, hidden_states) in layer_outputs {
+            let (class_id, confidence) =
+                self.classify_from_hidden_states(&hidden_states, &attention_mask)?;
+
+            if confidence >= threshold {
+                return Ok((class_id, confidence, layer_idx));
+            }
+        }
+
+        self.classify_text(text)
+            .map(|(class_id, confidence)| (class_id, confidence, self.config.num_hidden_layers))
     }
 
     /// Get class labels mapping

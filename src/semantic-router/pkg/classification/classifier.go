@@ -203,15 +203,44 @@ func createJailbreakInferenceCandle() JailbreakInference {
 }
 
 // MmBERT32KJailbreakInferenceImpl uses mmBERT-32K for jailbreak detection
-type MmBERT32KJailbreakInferenceImpl struct{}
+type MmBERT32KJailbreakInferenceImpl struct {
+	earlyExitEnabled    bool
+	earlyExitLayers     []int
+	earlyExitConfidence float32
+}
 
 func (c *MmBERT32KJailbreakInferenceImpl) Classify(text string) (candle_binding.ClassResult, error) {
+	if c.earlyExitEnabled {
+		return candle_binding.ClassifyMmBert32KJailbreakWithEarlyExit(
+			text,
+			c.earlyExitLayers,
+			c.earlyExitConfidence,
+		)
+	}
 	return candle_binding.ClassifyMmBert32KJailbreak(text)
 }
 
 // createMmBERT32KJailbreakInference creates mmBERT-32K jailbreak inference
-func createMmBERT32KJailbreakInference() JailbreakInference {
-	return &MmBERT32KJailbreakInferenceImpl{}
+func createMmBERT32KJailbreakInference(promptGuardCfg *config.PromptGuardConfig) JailbreakInference {
+	if promptGuardCfg == nil {
+		return &MmBERT32KJailbreakInferenceImpl{}
+	}
+
+	layers := promptGuardCfg.EarlyExitLayers
+	if len(layers) == 0 {
+		layers = []int{6, 12, 18}
+	}
+
+	confidence := promptGuardCfg.EarlyExitConfidence
+	if confidence <= 0 || confidence > 1 {
+		confidence = promptGuardCfg.Threshold
+	}
+
+	return &MmBERT32KJailbreakInferenceImpl{
+		earlyExitEnabled:    promptGuardCfg.EarlyExitEnabled,
+		earlyExitLayers:     layers,
+		earlyExitConfidence: confidence,
+	}
 }
 
 // createJailbreakInference creates the appropriate jailbreak inference based on configuration
@@ -222,7 +251,11 @@ func createJailbreakInference(promptGuardCfg *config.PromptGuardConfig, routerCf
 	// Check for mmBERT-32K first (takes precedence)
 	if promptGuardCfg.UseMmBERT32K {
 		logging.Infof("Using mmBERT-32K for jailbreak detection (32K context, YaRN RoPE)")
-		return createMmBERT32KJailbreakInference(), nil
+		if promptGuardCfg.EarlyExitEnabled {
+			logging.Infof("mmBERT-32K jailbreak early exit enabled (layers=%v, confidence=%.3f)",
+				promptGuardCfg.EarlyExitLayers, promptGuardCfg.EarlyExitConfidence)
+		}
+		return createMmBERT32KJailbreakInference(promptGuardCfg), nil
 	}
 
 	if promptGuardCfg.UseVLLM {

@@ -175,6 +175,9 @@ type PromptGuardConfig struct {
 	UseCPU               bool    `yaml:"use_cpu"`
 	UseModernBERT        bool    `yaml:"use_modernbert"`
 	UseMmBERT32K         bool    `yaml:"use_mmbert_32k"`
+	EarlyExitEnabled     bool    `yaml:"early_exit_enabled,omitempty"`
+	EarlyExitLayers      []int   `yaml:"early_exit_layers,omitempty"`
+	EarlyExitConfidence  float32 `yaml:"early_exit_confidence,omitempty"`
 	JailbreakMappingPath string  `yaml:"jailbreak_mapping_path"`
 	UseVLLM              bool    `yaml:"use_vllm,omitempty"`
 }
