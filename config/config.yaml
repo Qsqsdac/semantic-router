@@ -1388,9 +1388,9 @@ global:
         early_exit_layers: [4, 8, 12]
         early_exit_confidence: 0.8
         prompt_crop_enabled: true
-        prompt_crop_max_chars: 8192
-        prompt_crop_head_chars: 4096
-        prompt_crop_tail_chars: 4096
+        prompt_crop_max_chars: 1024
+        prompt_crop_head_chars: 512
+        prompt_crop_tail_chars: 512
         jailbreak_mapping_path: models/mmbert32k-jailbreak-detector-merged/jailbreak_type_mapping.json
         use_vllm: false
       classifier:
@@ -1408,7 +1408,7 @@ global:
           intent_keyword_case_sensitive: false
           intent_fasttext_model_path: models/intent_fasttext.bin
           intent_fasttext_binary_path: fasttext.real
-          intent_fasttext_threshold: 0.5
+          intent_fasttext_threshold: 0.6
           intent_fasttext_timeout_seconds: 2
         mcp:
           enabled: true
