@@ -69,3 +69,43 @@ func TestCategoryModelEffectiveIntentMatchModeFallsBackOnUnknownMode(t *testing.
 		t.Fatalf("expected unknown mode to fallback to %q, got %q", IntentMatchModeBERT, got)
 	}
 }
+
+func TestFactCheckModelEffectiveModeDefaultsToBERT(t *testing.T) {
+	cfg := FactCheckModelConfig{}
+	if got := cfg.EffectiveMode(); got != FactCheckModeBERT {
+		t.Fatalf("expected default fact-check mode %q, got %q", FactCheckModeBERT, got)
+	}
+}
+
+func TestFactCheckModelEffectiveModeNormalizesSVMOnly(t *testing.T) {
+	cfg := FactCheckModelConfig{Mode: " SVM_ONLY "}
+	if got := cfg.EffectiveMode(); got != FactCheckModeSVMOnly {
+		t.Fatalf("expected normalized fact-check mode %q, got %q", FactCheckModeSVMOnly, got)
+	}
+	if !cfg.UseSVMOnly() {
+		t.Fatal("expected svm_only helper to be enabled")
+	}
+	if !cfg.UseSVMPath() {
+		t.Fatal("expected svm path helper to be enabled")
+	}
+}
+
+func TestFactCheckModelEffectiveModeNormalizesSVMFallbackBERT(t *testing.T) {
+	cfg := FactCheckModelConfig{Mode: " SVM_FALLBACK_BERT "}
+	if got := cfg.EffectiveMode(); got != FactCheckModeSVMFallbackBERT {
+		t.Fatalf("expected normalized fact-check mode %q, got %q", FactCheckModeSVMFallbackBERT, got)
+	}
+	if !cfg.UseSVMFallbackBERT() {
+		t.Fatal("expected svm_fallback_bert helper to be enabled")
+	}
+	if !cfg.UseSVMPath() {
+		t.Fatal("expected svm path helper to be enabled")
+	}
+}
+
+func TestFactCheckModelEffectiveModeFallsBackOnUnknownMode(t *testing.T) {
+	cfg := FactCheckModelConfig{Mode: "unknown"}
+	if got := cfg.EffectiveMode(); got != FactCheckModeBERT {
+		t.Fatalf("expected unknown fact-check mode to fallback to %q, got %q", FactCheckModeBERT, got)
+	}
+}

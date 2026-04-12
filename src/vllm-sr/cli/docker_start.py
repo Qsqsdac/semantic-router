@@ -217,6 +217,11 @@ def _mount_config_and_state_dirs(
         cmd.extend(["-v", f"{intent_assets_dir}:/app/intent-assets:z"])
         log.info(f"Mounting intent assets directory: {intent_assets_dir}")
 
+    fact_check_assets_dir = os.path.join(config_dir, "fact-check-assets")
+    if os.path.exists(fact_check_assets_dir):
+        cmd.extend(["-v", f"{fact_check_assets_dir}:/app/fact-check-assets:z"])
+        log.info(f"Mounting fact-check assets directory: {fact_check_assets_dir}")
+
     dashboard_data_dir = os.path.join(config_dir, ".vllm-sr", "dashboard-data")
     os.makedirs(dashboard_data_dir, exist_ok=True)
     cmd.extend(["-v", f"{dashboard_data_dir}:/app/data:z"])

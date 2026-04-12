@@ -18,8 +18,21 @@ func (c *RouterConfig) IsHallucinationMitigationEnabled() bool {
 
 // IsFactCheckClassifierEnabled reports whether a fact-check model is bound.
 func (c *RouterConfig) IsFactCheckClassifierEnabled() bool {
-	if c.HallucinationMitigation.FactCheckModel.ModelID == "" {
-		return false
+	mode := c.HallucinationMitigation.FactCheckModel.EffectiveMode()
+	switch mode {
+	case FactCheckModeSVMOnly:
+		if c.HallucinationMitigation.Enabled {
+			return true
+		}
+		return len(c.FactCheckRules) > 0
+	case FactCheckModeSVMFallbackBERT:
+		if c.HallucinationMitigation.FactCheckModel.ModelID == "" {
+			return false
+		}
+	default:
+		if c.HallucinationMitigation.FactCheckModel.ModelID == "" {
+			return false
+		}
 	}
 	if c.HallucinationMitigation.Enabled {
 		return true

@@ -21,6 +21,7 @@ from collections import Counter
 import concurrent.futures
 import json
 import time
+import random
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -124,6 +125,7 @@ def _load_dataset_with_datasets(
     from datasets import load_dataset
 
     ds = load_dataset(dataset_name, split=split)
+    ds = ds.shuffle(seed=42)
     if max_samples > 0:
         ds = ds.select(range(min(max_samples, len(ds))))
     return [dict(item) for item in ds]
@@ -146,6 +148,7 @@ def _load_dataset_with_hf_hub_parquet(
     frames = [pd.read_parquet(p) for p in target_files]
     df = pd.concat(frames, ignore_index=True)
     records = df.to_dict(orient="records")
+    random.Random(42).shuffle(records)
     if max_samples > 0:
         records = records[:max_samples]
     return records

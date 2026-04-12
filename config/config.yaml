@@ -1437,7 +1437,9 @@ global:
         fact_check:
           model_ref: fact_check_classifier
           model_id: models/mmbert32k-factcheck-classifier-merged
+          mode: bert
           threshold: 0.65
+          svm_fallback_threshold: 0.65
           use_cpu: true
           use_mmbert_32k: true
         detector:

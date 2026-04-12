@@ -7,6 +7,10 @@ const (
 	IntentMatchModeKeywordFallbackBERT  = "keyword_fallback_bert"
 	IntentMatchModeFastTextFallbackBERT = "fasttext_fallback_bert"
 	IntentMatchModeFastTextOnly         = "fasttext_only"
+
+	FactCheckModeBERT            = "bert"
+	FactCheckModeSVMOnly         = "svm_only"
+	FactCheckModeSVMFallbackBERT = "svm_fallback_bert"
 )
 
 // Classifier represents the configuration for text classification.
@@ -265,10 +269,42 @@ type HallucinationMitigationConfig struct {
 }
 
 type FactCheckModelConfig struct {
-	ModelID      string  `yaml:"model_id"`
-	Threshold    float32 `yaml:"threshold"`
-	UseCPU       bool    `yaml:"use_cpu"`
-	UseMmBERT32K bool    `yaml:"use_mmbert_32k"`
+	ModelID              string  `yaml:"model_id"`
+	Threshold            float32 `yaml:"threshold"`
+	SVMFallbackThreshold float32 `yaml:"svm_fallback_threshold,omitempty"`
+	UseCPU               bool    `yaml:"use_cpu"`
+	UseMmBERT32K         bool    `yaml:"use_mmbert_32k"`
+	Mode                 string  `yaml:"mode,omitempty"`
+}
+
+func (m FactCheckModelConfig) EffectiveMode() string {
+	mode := strings.ToLower(strings.TrimSpace(m.Mode))
+	if mode == "" {
+		return FactCheckModeBERT
+	}
+	if mode == FactCheckModeSVMOnly {
+		return FactCheckModeSVMOnly
+	}
+	if mode == FactCheckModeSVMFallbackBERT {
+		return FactCheckModeSVMFallbackBERT
+	}
+	if mode == FactCheckModeBERT {
+		return FactCheckModeBERT
+	}
+	return FactCheckModeBERT
+}
+
+func (m FactCheckModelConfig) UseSVMOnly() bool {
+	return m.EffectiveMode() == FactCheckModeSVMOnly
+}
+
+func (m FactCheckModelConfig) UseSVMFallbackBERT() bool {
+	return m.EffectiveMode() == FactCheckModeSVMFallbackBERT
+}
+
+func (m FactCheckModelConfig) UseSVMPath() bool {
+	mode := m.EffectiveMode()
+	return mode == FactCheckModeSVMOnly || mode == FactCheckModeSVMFallbackBERT
 }
 
 type HallucinationModelConfig struct {

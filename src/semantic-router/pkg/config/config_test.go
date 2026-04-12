@@ -3247,6 +3247,22 @@ default_model: "test-model"
 
 			Expect(cfg.IsFactCheckClassifierEnabled()).To(BeFalse())
 		})
+
+		It("should return true for svm_only mode without model_id when enabled", func() {
+			cfg := &RouterConfig{}
+			cfg.HallucinationMitigation.Enabled = true
+			cfg.HallucinationMitigation.FactCheckModel.Mode = FactCheckModeSVMOnly
+
+			Expect(cfg.IsFactCheckClassifierEnabled()).To(BeTrue())
+		})
+
+		It("should return false for svm_fallback_bert mode without model_id", func() {
+			cfg := &RouterConfig{}
+			cfg.HallucinationMitigation.Enabled = true
+			cfg.HallucinationMitigation.FactCheckModel.Mode = FactCheckModeSVMFallbackBERT
+
+			Expect(cfg.IsFactCheckClassifierEnabled()).To(BeFalse())
+		})
 	})
 
 	Describe("IsFeedbackDetectorEnabled", func() {
