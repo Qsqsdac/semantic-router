@@ -48,5 +48,8 @@ python ../../scripts/eval_fact_check_api.py --router-url http://localhost:8280 -
 ## 单次测试
 curl -X POST http://localhost:8280/api/v1/classify/complexity   -H "Content-Type: application/json"   -d '{"text": "Explain the tradeoffs in consensus algorithms."}'
 
+## 脚本
+python ../../scripts/eval_complexity_api.py --router-url http://localhost:8280 --max-samples 1000 --workers 4
+
 # 端到端测试
 curl -v http://localhost:9099/v1/chat/completions -H "Content-Type: application/json" -H "Authorization: Bearer sk-123456" -d '{ "model": "MoM", "messages": [{"role": "user", "content": "What is the derivative of x^2?"}], "reasoning_effort": "none"}'
