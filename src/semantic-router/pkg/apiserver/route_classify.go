@@ -321,6 +321,23 @@ func (s *ClassificationAPIServer) handleFactCheckClassification(w http.ResponseW
 	s.writeJSONResponse(w, http.StatusOK, response)
 }
 
+// handleComplexityClassification handles complexity classification requests.
+func (s *ClassificationAPIServer) handleComplexityClassification(w http.ResponseWriter, r *http.Request) {
+	var req services.ComplexityRequest
+	if err := s.parseJSONRequest(r, &req); err != nil {
+		s.writeErrorResponse(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		return
+	}
+
+	response, err := s.classificationSvc.ClassifyComplexity(req)
+	if err != nil {
+		s.writeErrorResponse(w, http.StatusInternalServerError, "CLASSIFICATION_ERROR", err.Error())
+		return
+	}
+
+	s.writeJSONResponse(w, http.StatusOK, response)
+}
+
 // handleUserFeedbackClassification handles user feedback classification requests
 func (s *ClassificationAPIServer) handleUserFeedbackClassification(w http.ResponseWriter, r *http.Request) {
 	var req services.UserFeedbackRequest

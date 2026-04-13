@@ -21,6 +21,7 @@ type batchClassificationService interface {
 
 type auxiliaryClassificationService interface {
 	ClassifyFactCheck(req services.FactCheckRequest) (*services.FactCheckResponse, error)
+	ClassifyComplexity(req services.ComplexityRequest) (*services.ComplexityResponse, error)
 	ClassifyUserFeedback(req services.UserFeedbackRequest) (*services.UserFeedbackResponse, error)
 	HasClassifier() bool
 }
@@ -96,6 +97,10 @@ func (s *liveClassificationService) ClassifyBatchUnifiedWithOptions(
 
 func (s *liveClassificationService) ClassifyFactCheck(req services.FactCheckRequest) (*services.FactCheckResponse, error) {
 	return s.current().ClassifyFactCheck(req)
+}
+
+func (s *liveClassificationService) ClassifyComplexity(req services.ComplexityRequest) (*services.ComplexityResponse, error) {
+	return s.current().ClassifyComplexity(req)
 }
 
 func (s *liveClassificationService) ClassifyUserFeedback(

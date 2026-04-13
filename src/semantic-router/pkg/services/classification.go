@@ -788,6 +788,28 @@ type FactCheckResponse struct {
 	ProcessingTimeMs int64   `json:"processing_time_ms"`
 }
 
+// ComplexityRequest represents a request for complexity classification.
+type ComplexityRequest struct {
+	Text string `json:"text"`
+}
+
+// ComplexityResult represents the per-rule complexity classification result.
+type ComplexityResult struct {
+	RuleName          string  `json:"rule_name"`
+	Classification    string  `json:"classification"`
+	RawDifference     float64 `json:"raw_difference"`
+	HardMaxSimilarity float64 `json:"hard_max_similarity"`
+	EasyMaxSimilarity float64 `json:"easy_max_similarity"`
+	Threshold         float64 `json:"threshold,omitempty"`
+	SignalSource      string  `json:"signal_source,omitempty"`
+}
+
+// ComplexityResponse represents the response from complexity classification.
+type ComplexityResponse struct {
+	Results          []ComplexityResult `json:"results"`
+	ProcessingTimeMs int64              `json:"processing_time_ms"`
+}
+
 // ClassifyFactCheck performs fact-check classification
 func (s *ClassificationService) ClassifyFactCheck(req FactCheckRequest) (*FactCheckResponse, error) {
 	start := time.Now()
@@ -831,6 +853,51 @@ func (s *ClassificationService) ClassifyFactCheck(req FactCheckRequest) (*FactCh
 		Label:            result.Label,
 		Confidence:       float64(result.Confidence),
 		ProcessingTimeMs: processingTime,
+	}, nil
+}
+
+// ClassifyComplexity performs text-only complexity classification.
+func (s *ClassificationService) ClassifyComplexity(req ComplexityRequest) (*ComplexityResponse, error) {
+	start := time.Now()
+
+	if req.Text == "" {
+		return nil, fmt.Errorf("text cannot be empty")
+	}
+
+	if s.classifier == nil {
+		return &ComplexityResponse{
+			Results:          []ComplexityResult{},
+			ProcessingTimeMs: time.Since(start).Milliseconds(),
+		}, nil
+	}
+	if len(s.classifier.Config.ComplexityRules) == 0 {
+		return &ComplexityResponse{
+			Results:          []ComplexityResult{},
+			ProcessingTimeMs: time.Since(start).Milliseconds(),
+		}, nil
+	}
+
+	results, err := s.classifier.ClassifyComplexity(req.Text)
+	if err != nil {
+		return nil, fmt.Errorf("complexity classification failed: %w", err)
+	}
+
+	responseResults := make([]ComplexityResult, 0, len(results))
+	for _, result := range results {
+		responseResults = append(responseResults, ComplexityResult{
+			RuleName:          result.RuleName,
+			Classification:    result.Classification,
+			RawDifference:     float64(result.RawDifference),
+			HardMaxSimilarity: float64(result.HardMaxSimilarity),
+			EasyMaxSimilarity: float64(result.EasyMaxSimilarity),
+			Threshold:         float64(result.Threshold),
+			SignalSource:      result.SignalSource,
+		})
+	}
+
+	return &ComplexityResponse{
+		Results:          responseResults,
+		ProcessingTimeMs: time.Since(start).Milliseconds(),
 	}, nil
 }
 

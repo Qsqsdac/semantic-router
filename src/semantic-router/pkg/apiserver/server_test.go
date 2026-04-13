@@ -12,6 +12,19 @@ import (
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/services"
 )
 
+type stubComplexityService struct {
+	*services.ClassificationService
+	response *services.ComplexityResponse
+	err      error
+}
+
+func (s *stubComplexityService) ClassifyComplexity(req services.ComplexityRequest) (*services.ComplexityResponse, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.response, nil
+}
+
 func TestHandleBatchClassification(t *testing.T) {
 	// Create a test server with placeholder service
 	apiServer := &ClassificationAPIServer{
@@ -306,6 +319,61 @@ func TestBatchClassificationConfiguration(t *testing.T) {
 	}
 }
 
+func TestHandleComplexityClassification(t *testing.T) {
+	apiServer := &ClassificationAPIServer{
+		classificationSvc: &stubComplexityService{
+			ClassificationService: services.NewPlaceholderClassificationService(),
+			response: &services.ComplexityResponse{
+				Results: []services.ComplexityResult{{
+					RuleName:          "needs_reasoning",
+					Classification:    "hard",
+					RawDifference:     0.8125,
+					HardMaxSimilarity: 0.9210,
+					EasyMaxSimilarity: 0.1085,
+					Threshold:         0.75,
+				}},
+				ProcessingTimeMs: 7,
+			},
+		},
+		config: &config.RouterConfig{},
+	}
+
+	req := httptest.NewRequest("POST", "/api/v1/classify/complexity", bytes.NewBufferString(`{"text":"Explain the tradeoffs in distributed consensus"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	apiServer.handleComplexityClassification(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var response services.ComplexityResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to unmarshal complexity response: %v", err)
+	}
+
+	if response.ProcessingTimeMs != 7 {
+		t.Fatalf("Expected processing time 7, got %d", response.ProcessingTimeMs)
+	}
+	if len(response.Results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(response.Results))
+	}
+	result := response.Results[0]
+	if result.RuleName != "needs_reasoning" {
+		t.Fatalf("Expected rule name needs_reasoning, got %s", result.RuleName)
+	}
+	if result.Classification != "hard" {
+		t.Fatalf("Expected classification hard, got %s", result.Classification)
+	}
+	if result.RawDifference != 0.8125 {
+		t.Fatalf("Expected raw difference 0.8125, got %v", result.RawDifference)
+	}
+	if result.HardMaxSimilarity != 0.9210 || result.EasyMaxSimilarity != 0.1085 {
+		t.Fatalf("Unexpected similarity scores: hard=%v easy=%v", result.HardMaxSimilarity, result.EasyMaxSimilarity)
+	}
+}
+
 func TestOpenAIModelsEndpoint(t *testing.T) {
 	// Test with default config (IncludeConfigModelsInList = false)
 	cfg := &config.RouterConfig{
@@ -593,6 +661,7 @@ func TestAPIOverviewEndpoint(t *testing.T) {
 		"/api/v1/classify/pii",
 		"/api/v1/classify/security",
 		"/api/v1/classify/batch",
+		"/api/v1/classify/complexity",
 		"/health",
 	}
 
@@ -692,6 +761,7 @@ func TestOpenAPISpecEndpoint(t *testing.T) {
 		"/health",
 		"/api/v1",
 		"/api/v1/classify/batch",
+		"/api/v1/classify/complexity",
 		"/openapi.json",
 		"/docs",
 	}

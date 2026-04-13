@@ -31,6 +31,17 @@ type ComplexityClassifier struct {
 	hasImageCandidates bool   // True if any rule uses image_candidates
 }
 
+// ComplexityClassificationResult captures the raw similarity scores and final label for one rule.
+type ComplexityClassificationResult struct {
+	RuleName          string  `json:"rule_name"`
+	Classification    string  `json:"classification"`
+	RawDifference     float32 `json:"raw_difference"`
+	HardMaxSimilarity float32 `json:"hard_max_similarity"`
+	EasyMaxSimilarity float32 `json:"easy_max_similarity"`
+	Threshold         float32 `json:"threshold"`
+	SignalSource      string  `json:"signal_source,omitempty"`
+}
+
 // NewComplexityClassifier creates a new ComplexityClassifier with precomputed candidate embeddings.
 // When rules contain image_candidates, the multimodal model must be initialized beforehand.
 func NewComplexityClassifier(rules []config.ComplexityRule, modelType string) (*ComplexityClassifier, error) {
@@ -221,12 +232,31 @@ func (c *ComplexityClassifier) preloadCandidateEmbeddings() error {
 }
 
 // Classify evaluates the query against ALL complexity rules independently (text-only).
-// For CUA requests with screenshots, use ClassifyWithImage instead.
+// For CUA requests with screenshots, use ClassifyWithImageDetailed instead.
 func (c *ComplexityClassifier) Classify(query string) ([]string, error) {
-	return c.ClassifyWithImage(query, "")
+	detailed, err := c.ClassifyDetailed(query)
+	if err != nil {
+		return nil, err
+	}
+	return complexityResultsToLabels(detailed), nil
+}
+
+// ClassifyDetailed evaluates the query against ALL complexity rules independently.
+func (c *ComplexityClassifier) ClassifyDetailed(query string) ([]ComplexityClassificationResult, error) {
+	return c.ClassifyWithImageDetailed(query, "")
 }
 
 // ClassifyWithImage evaluates the query (and optionally a request image) against
+// ALL complexity rules independently.
+func (c *ComplexityClassifier) ClassifyWithImage(query string, imageURL string) ([]string, error) {
+	detailed, err := c.ClassifyWithImageDetailed(query, imageURL)
+	if err != nil {
+		return nil, err
+	}
+	return complexityResultsToLabels(detailed), nil
+}
+
+// ClassifyWithImageDetailed evaluates the query (and optionally a request image) against
 // ALL complexity rules independently.
 //
 // When imageURL is provided (e.g. a base64 data-URI screenshot from a CUA request),
@@ -234,9 +264,8 @@ func (c *ComplexityClassifier) Classify(query string) ([]string, error) {
 // The text query is always compared against the text knowledge base.
 // The difficulty score fuses both channels: d(t) = max(|d_vis|, |d_sem|).
 //
-// Returns: all matched rules in format "rulename:difficulty"
-// (e.g., ["cua_difficulty:hard", "cua_difficulty:easy"])
-func (c *ComplexityClassifier) ClassifyWithImage(query string, imageURL string) ([]string, error) {
+// Returns: all matched rules with raw similarity differences and labels.
+func (c *ComplexityClassifier) ClassifyWithImageDetailed(query string, imageURL string) ([]ComplexityClassificationResult, error) {
 	if len(c.rules) == 0 {
 		return nil, nil
 	}
@@ -270,7 +299,7 @@ func (c *ComplexityClassifier) ClassifyWithImage(query string, imageURL string) 
 		}
 	}
 
-	var matchedRules []string
+	var matchedRules []ComplexityClassificationResult
 
 	for i := range c.rules {
 		rule := &c.rules[i]
@@ -352,8 +381,24 @@ func (c *ComplexityClassifier) ClassifyWithImage(query string, imageURL string) 
 				rule.Name, maxHardSim, maxEasySim, difficultySignal, difficulty)
 		}
 
-		matchedRules = append(matchedRules, fmt.Sprintf("%s:%s", rule.Name, difficulty))
+		matchedRules = append(matchedRules, ComplexityClassificationResult{
+			RuleName:          rule.Name,
+			Classification:    difficulty,
+			RawDifference:     difficultySignal,
+			HardMaxSimilarity: maxHardSim,
+			EasyMaxSimilarity: maxEasySim,
+			Threshold:         rule.Threshold,
+			SignalSource:      signalSource,
+		})
 	}
 
 	return matchedRules, nil
+}
+
+func complexityResultsToLabels(results []ComplexityClassificationResult) []string {
+	labels := make([]string, 0, len(results))
+	for _, result := range results {
+		labels = append(labels, fmt.Sprintf("%s:%s", result.RuleName, result.Classification))
+	}
+	return labels
 }

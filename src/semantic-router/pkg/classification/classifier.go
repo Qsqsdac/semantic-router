@@ -3228,6 +3228,21 @@ func (c *Classifier) ClassifyFactCheck(text string) (*FactCheckResult, error) {
 	return result, nil
 }
 
+// ClassifyComplexity performs complexity classification on the given text and returns
+// the raw similarity deltas and final labels for each configured complexity rule.
+func (c *Classifier) ClassifyComplexity(text string) ([]ComplexityClassificationResult, error) {
+	if c.complexityClassifier == nil {
+		return nil, fmt.Errorf("complexity classifier is not initialized")
+	}
+
+	results, err := c.complexityClassifier.ClassifyDetailed(text)
+	if err != nil {
+		return nil, fmt.Errorf("complexity classification failed: %w", err)
+	}
+
+	return results, nil
+}
+
 // DetectHallucination checks if an answer contains hallucinations given the context
 // context: The tool results or RAG context that should ground the answer
 // question: The original user question

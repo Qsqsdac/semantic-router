@@ -45,6 +45,10 @@ func (s *fakeResolvedClassificationService) ClassifyFactCheck(req services.FactC
 	return nil, fmt.Errorf("not used in this test: %q", req.Text)
 }
 
+func (s *fakeResolvedClassificationService) ClassifyComplexity(req services.ComplexityRequest) (*services.ComplexityResponse, error) {
+	return nil, fmt.Errorf("not used in this test: %q", req.Text)
+}
+
 func (s *fakeResolvedClassificationService) ClassifyUserFeedback(req services.UserFeedbackRequest) (*services.UserFeedbackResponse, error) {
 	return nil, fmt.Errorf("not used in this test: %q", req.Text)
 }
