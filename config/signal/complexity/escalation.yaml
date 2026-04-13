@@ -3,6 +3,8 @@ routing:
     complexity:
       - name: needs_reasoning
         threshold: 0.75
+        match_mode: keyword_fallback_emb
+        keyword_mapping_path: src/vllm-sr/complexity-assets/keyword_map.json
         description: Escalate multi-step reasoning or synthesis-heavy prompts.
         hard:
           candidates:

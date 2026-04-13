@@ -1,0 +1,14 @@
+{
+  "hard": [
+    "step by step",
+    "tradeoff",
+    "root cause",
+    "architecture diagram"
+  ],
+  "easy": [
+    "answer briefly",
+    "quick summary",
+    "simple rewrite",
+    "short answer"
+  ]
+}

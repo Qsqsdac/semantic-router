@@ -222,6 +222,11 @@ def _mount_config_and_state_dirs(
         cmd.extend(["-v", f"{fact_check_assets_dir}:/app/fact-check-assets:z"])
         log.info(f"Mounting fact-check assets directory: {fact_check_assets_dir}")
 
+    complexity_assets_dir = os.path.join(config_dir, "complexity-assets")
+    if os.path.exists(complexity_assets_dir):
+        cmd.extend(["-v", f"{complexity_assets_dir}:/app/complexity-assets:z"])
+        log.info(f"Mounting complexity assets directory: {complexity_assets_dir}")
+
     dashboard_data_dir = os.path.join(config_dir, ".vllm-sr", "dashboard-data")
     os.makedirs(dashboard_data_dir, exist_ok=True)
     cmd.extend(["-v", f"{dashboard_data_dir}:/app/data:z"])

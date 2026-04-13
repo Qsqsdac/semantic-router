@@ -157,12 +157,34 @@ func HasImageCandidatesInRules(rules []ComplexityRule) bool {
 }
 
 type ComplexityRule struct {
-	Name        string               `yaml:"name"`
-	Threshold   float32              `yaml:"threshold"`
-	Hard        ComplexityCandidates `yaml:"hard"`
-	Easy        ComplexityCandidates `yaml:"easy"`
-	Description string               `yaml:"description,omitempty"`
-	Composer    *RuleCombination     `yaml:"composer,omitempty"`
+	Name               string               `yaml:"name"`
+	Threshold          float32              `yaml:"threshold"`
+	MatchMode          string               `yaml:"match_mode,omitempty"`
+	KeywordMappingPath string               `yaml:"keyword_mapping_path,omitempty"`
+	Hard               ComplexityCandidates `yaml:"hard"`
+	Easy               ComplexityCandidates `yaml:"easy"`
+	Description        string               `yaml:"description,omitempty"`
+	Composer           *RuleCombination     `yaml:"composer,omitempty"`
+}
+
+const (
+	ComplexityMatchModeEmb                = "emb"
+	ComplexityMatchModeKeywordFallbackEmb = "keyword_fallback_emb"
+)
+
+func (r ComplexityRule) EffectiveMatchMode() string {
+	mode := strings.ToLower(strings.TrimSpace(r.MatchMode))
+	if mode == "" {
+		return ComplexityMatchModeEmb
+	}
+	if mode == ComplexityMatchModeKeywordFallbackEmb {
+		return ComplexityMatchModeKeywordFallbackEmb
+	}
+	return ComplexityMatchModeEmb
+}
+
+func (r ComplexityRule) UseKeywordFallbackToEmb() bool {
+	return r.EffectiveMatchMode() == ComplexityMatchModeKeywordFallbackEmb
 }
 
 type Category struct {

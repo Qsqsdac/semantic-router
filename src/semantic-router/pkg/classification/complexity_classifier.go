@@ -19,6 +19,9 @@ import (
 type ComplexityClassifier struct {
 	rules []config.ComplexityRule
 
+	// Optional per-rule keyword fast-path used by match_mode=keyword_fallback_emb.
+	keywordMatchers map[string]ComplexityKeywordMatcher
+
 	// Precomputed text embeddings for hard and easy candidates
 	hardEmbeddings map[string]map[string][]float32 // ruleName -> candidate -> embedding
 	easyEmbeddings map[string]map[string][]float32 // ruleName -> candidate -> embedding
@@ -51,12 +54,28 @@ func NewComplexityClassifier(rules []config.ComplexityRule, modelType string) (*
 
 	c := &ComplexityClassifier{
 		rules:               rules,
+		keywordMatchers:     make(map[string]ComplexityKeywordMatcher),
 		hardEmbeddings:      make(map[string]map[string][]float32),
 		easyEmbeddings:      make(map[string]map[string][]float32),
 		imageHardEmbeddings: make(map[string]map[string][]float32),
 		imageEasyEmbeddings: make(map[string]map[string][]float32),
 		modelType:           modelType,
 		hasImageCandidates:  config.HasImageCandidatesInRules(rules),
+	}
+
+	for _, rule := range rules {
+		if !rule.UseKeywordFallbackToEmb() {
+			continue
+		}
+		if rule.KeywordMappingPath == "" {
+			return nil, fmt.Errorf("complexity rule %q requires keyword_mapping_path when match_mode=%q", rule.Name, config.ComplexityMatchModeKeywordFallbackEmb)
+		}
+		matcher, err := NewAhoComplexityKeywordMatcher(rule.KeywordMappingPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize complexity keyword matcher for rule %q: %w", rule.Name, err)
+		}
+		c.keywordMatchers[rule.Name] = matcher
+		logging.Infof("Complexity keyword fast-path enabled for rule=%s (mode=%s)", rule.Name, rule.EffectiveMatchMode())
 	}
 
 	if c.hasImageCandidates {
@@ -270,39 +289,81 @@ func (c *ComplexityClassifier) ClassifyWithImageDetailed(query string, imageURL 
 		return nil, nil
 	}
 
-	// Compute text query embedding once
-	queryOutput, err := getEmbeddingWithModelType(query, c.modelType, 0)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compute query embedding: %w", err)
-	}
-	queryEmbedding := queryOutput.Embedding
-
-	// Compute multimodal text embedding for text-vs-image-candidate comparison
-	var mmTextEmbedding []float32
-	if c.hasImageCandidates {
-		mmEmb, mmErr := getMultiModalTextEmbedding(query, 0)
-		if mmErr != nil {
-			logging.Warnf("[Complexity Signal] Failed to compute multimodal text embedding: %v", mmErr)
-		} else {
-			mmTextEmbedding = mmEmb
-		}
-	}
-
-	// Compute multimodal image embedding of the request screenshot (SigLIP)
-	var mmImageEmbedding []float32
-	if imageURL != "" && c.hasImageCandidates {
-		imgEmb, imgErr := getMultiModalImageEmbedding(imageURL, 0)
-		if imgErr != nil {
-			logging.Warnf("[Complexity Signal] Failed to compute request image embedding: %v", imgErr)
-		} else {
-			mmImageEmbedding = imgEmb
-		}
-	}
-
 	var matchedRules []ComplexityClassificationResult
+	keywordMatched := make(map[string]string, len(c.rules))
+	needEmbeddingPath := false
 
 	for i := range c.rules {
 		rule := &c.rules[i]
+		matcher := c.keywordMatchers[rule.Name]
+		if matcher == nil {
+			needEmbeddingPath = true
+			continue
+		}
+
+		level, matched, err := matcher.Classify(query)
+		if err != nil {
+			logging.Warnf("Complexity rule '%s': keyword fast-path failed, falling back to emb: %v", rule.Name, err)
+			needEmbeddingPath = true
+			continue
+		}
+		if matched {
+			keywordMatched[rule.Name] = level
+		} else {
+			needEmbeddingPath = true
+		}
+	}
+
+	var queryEmbedding []float32
+	var mmTextEmbedding []float32
+	var mmImageEmbedding []float32
+	if needEmbeddingPath {
+		queryOutput, err := getEmbeddingWithModelType(query, c.modelType, 0)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compute query embedding: %w", err)
+		}
+		queryEmbedding = queryOutput.Embedding
+
+		if c.hasImageCandidates {
+			mmEmb, mmErr := getMultiModalTextEmbedding(query, 0)
+			if mmErr != nil {
+				logging.Warnf("[Complexity Signal] Failed to compute multimodal text embedding: %v", mmErr)
+			} else {
+				mmTextEmbedding = mmEmb
+			}
+		}
+
+		if imageURL != "" && c.hasImageCandidates {
+			imgEmb, imgErr := getMultiModalImageEmbedding(imageURL, 0)
+			if imgErr != nil {
+				logging.Warnf("[Complexity Signal] Failed to compute request image embedding: %v", imgErr)
+			} else {
+				mmImageEmbedding = imgEmb
+			}
+		}
+	}
+
+	for i := range c.rules {
+		rule := &c.rules[i]
+
+		if level, ok := keywordMatched[rule.Name]; ok {
+			rawDifference := rule.Threshold + 0.001
+			if level == "easy" {
+				rawDifference = -rule.Threshold - 0.001
+			}
+
+			logging.Infof("Complexity rule '%s': matched via keyword fast-path, difficulty=%s", rule.Name, level)
+			matchedRules = append(matchedRules, ComplexityClassificationResult{
+				RuleName:          rule.Name,
+				Classification:    level,
+				RawDifference:     rawDifference,
+				HardMaxSimilarity: -1,
+				EasyMaxSimilarity: -1,
+				Threshold:         rule.Threshold,
+				SignalSource:      "keyword",
+			})
+			continue
+		}
 
 		// --- Text signal (d_sem): text query vs text candidates ---
 		maxHardSim := float32(-1.0)
