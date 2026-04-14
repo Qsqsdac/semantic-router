@@ -3,7 +3,9 @@ package classification
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,6 +45,30 @@ type ComplexityClassificationResult struct {
 	EasyMaxSimilarity float32 `json:"easy_max_similarity"`
 	Threshold         float32 `json:"threshold"`
 	SignalSource      string  `json:"signal_source,omitempty"`
+}
+
+var complexitySentenceSplitRE = regexp.MustCompile(`[.!?。！？；;，,：:\n\r]+`)
+
+func splitComplexitySentences(query string) []string {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return nil
+	}
+
+	parts := complexitySentenceSplitRE.Split(trimmed, -1)
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		segment := strings.TrimSpace(part)
+		if segment == "" {
+			continue
+		}
+		segments = append(segments, segment)
+	}
+
+	if len(segments) == 0 {
+		return []string{trimmed}
+	}
+	return segments
 }
 
 // NewComplexityClassifier creates a new ComplexityClassifier with precomputed candidate embeddings.
@@ -314,15 +340,23 @@ func (c *ComplexityClassifier) ClassifyWithImageDetailed(query string, imageURL 
 		}
 	}
 
-	var queryEmbedding []float32
+	var sentenceEmbeddings [][]float32
 	var mmTextEmbedding []float32
 	var mmImageEmbedding []float32
 	if needEmbeddingPath {
-		queryOutput, err := getEmbeddingWithModelType(query, c.modelType, 0)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compute query embedding: %w", err)
+		sentences := splitComplexitySentences(query)
+		if len(sentences) == 0 {
+			return nil, fmt.Errorf("query cannot be empty")
 		}
-		queryEmbedding = queryOutput.Embedding
+
+		sentenceEmbeddings = make([][]float32, 0, len(sentences))
+		for _, sentence := range sentences {
+			queryOutput, err := getEmbeddingWithModelType(sentence, c.modelType, 0)
+			if err != nil {
+				return nil, fmt.Errorf("failed to compute sentence embedding: %w", err)
+			}
+			sentenceEmbeddings = append(sentenceEmbeddings, queryOutput.Embedding)
+		}
 
 		if c.hasImageCandidates {
 			mmEmb, mmErr := getMultiModalTextEmbedding(query, 0)
@@ -365,18 +399,32 @@ func (c *ComplexityClassifier) ClassifyWithImageDetailed(query string, imageURL 
 			continue
 		}
 
-		// --- Text signal (d_sem): text query vs text candidates ---
+		// --- Text signal (d_sem): per-sentence query embeddings vs text candidates ---
+		hardSentenceHit := false
 		maxHardSim := float32(-1.0)
 		for _, hardEmb := range c.hardEmbeddings[rule.Name] {
-			if sim := cosineSimilarity(queryEmbedding, hardEmb); sim > maxHardSim {
-				maxHardSim = sim
+			for _, sentenceEmb := range sentenceEmbeddings {
+				sim := cosineSimilarity(sentenceEmb, hardEmb)
+				if sim > maxHardSim {
+					maxHardSim = sim
+				}
+				if sim >= rule.Threshold {
+					hardSentenceHit = true
+				}
 			}
 		}
 
+		easySentenceHit := false
 		maxEasySim := float32(-1.0)
 		for _, easyEmb := range c.easyEmbeddings[rule.Name] {
-			if sim := cosineSimilarity(queryEmbedding, easyEmb); sim > maxEasySim {
-				maxEasySim = sim
+			for _, sentenceEmb := range sentenceEmbeddings {
+				sim := cosineSimilarity(sentenceEmb, easyEmb)
+				if sim > maxEasySim {
+					maxEasySim = sim
+				}
+				if sim >= rule.Threshold {
+					easySentenceHit = true
+				}
 			}
 		}
 
@@ -419,7 +467,11 @@ func (c *ComplexityClassifier) ClassifyWithImageDetailed(query string, imageURL 
 		}
 
 		var difficulty string
-		if difficultySignal > rule.Threshold {
+		if hardSentenceHit && !easySentenceHit {
+			difficulty = "hard"
+		} else if easySentenceHit && !hardSentenceHit {
+			difficulty = "easy"
+		} else if difficultySignal > rule.Threshold {
 			difficulty = "hard"
 		} else if difficultySignal < -rule.Threshold {
 			difficulty = "easy"

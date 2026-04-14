@@ -53,7 +53,7 @@ routing:
   signals:
     complexity:
       - name: "needs_reasoning"
-        threshold: 0.75
+        threshold: 0.25
         match_mode: keyword_fallback_emb
         keyword_mapping_path: complexity-assets/keyword_map.json
         description: "Escalate multi-step reasoning or synthesis-heavy prompts."
@@ -62,11 +62,15 @@ routing:
             - solve this step by step
             - compare multiple tradeoffs
             - analyze the root cause
+            - write a detailed story with vivid descriptions and character development
+            - provide a comprehensive analysis with supporting examples
         easy:
           candidates:
             - answer briefly
             - quick summary
             - simple rewrite
+            - paraphrase this sentence
+            - summarize this passage in one sentence
 
   decisions:
     - name: "complexity_route"

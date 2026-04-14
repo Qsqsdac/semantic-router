@@ -14,7 +14,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Sequence, Tuple
 
 SUPPORTED_DATASET = "lmsys/chatbot_arena_conversations"
 DEFAULT_SPLIT = "train"
-DEFAULT_SAMPLE_SIZE = 11000
+DEFAULT_SAMPLE_SIZE = 10000
 DEFAULT_TRAIN_RATIO = 0.9
 DEFAULT_HF_ENDPOINT = "https://hf-mirror.com"
 DEFAULT_FALLBACK_DATASETS = "HuggingFaceH4/ultrachat_200k"
