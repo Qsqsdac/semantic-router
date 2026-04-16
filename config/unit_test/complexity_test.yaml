@@ -53,20 +53,24 @@ routing:
   signals:
     complexity:
       - name: "needs_reasoning"
-        threshold: 0.75
+        threshold: 0.25
         match_mode: keyword_fallback_emb
-        keyword_mapping_path: src/vllm-sr/complexity-assets/keyword_map.json
+        keyword_mapping_path: complexity-assets/keyword_map.json
         description: "Escalate multi-step reasoning or synthesis-heavy prompts."
         hard:
           candidates:
             - solve this step by step
             - compare multiple tradeoffs
             - analyze the root cause
+            - write a detailed story with vivid descriptions and character development
+            - provide a comprehensive analysis with supporting examples
         easy:
           candidates:
             - answer briefly
             - quick summary
             - simple rewrite
+            - paraphrase this sentence
+            - summarize this passage in one sentence
 
   decisions:
     - name: "complexity_route"
@@ -106,7 +110,7 @@ global:
         bert_model_path: models/mom-embedding-light
         use_cpu: true
         embedding_config:
-          model_type: qwen3
+          model_type: mmbert
           preload_embeddings: true
           target_dimension: 768
           target_layer: 22

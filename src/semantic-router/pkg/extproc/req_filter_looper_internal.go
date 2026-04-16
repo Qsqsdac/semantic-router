@@ -76,11 +76,15 @@ func (r *OpenAIRouter) getReasoningInfoFromDecision(
 func (r *OpenAIRouter) modifyRequestBodyForLooper(
 	openAIRequest *openai.ChatCompletionNewParams,
 	modelName string,
+	upstreamModel string,
 	decisionName string,
 	useReasoning bool,
 	ctx *RequestContext,
 ) ([]byte, error) {
-	openAIRequest.Model = modelName
+	if upstreamModel == "" {
+		upstreamModel = modelName
+	}
+	openAIRequest.Model = upstreamModel
 
 	modifiedBody, err := serializeOpenAIRequestWithStream(
 		openAIRequest,
@@ -112,7 +116,7 @@ func (r *OpenAIRouter) modifyRequestBodyForLooper(
 	modifiedBody, err = r.addSystemPromptIfConfigured(
 		modifiedBody,
 		decisionName,
-		modelName,
+		upstreamModel,
 		ctx,
 	)
 	if err != nil {
@@ -172,8 +176,19 @@ func (r *OpenAIRouter) handleLooperInternalRequest(
 	ctx *RequestContext,
 ) (*ext_proc.ProcessingResponse, error) {
 	logging.Infof("[Looper] Handling internal request for model: %s", modelName)
+	upstreamModel := modelName
+	if r.Config != nil {
+		_, endpointName, found, err := r.Config.SelectBestEndpointWithDetailsForModel(modelName)
+		if err != nil {
+			logging.Errorf("[Looper] Failed to resolve endpoint for model %s: %v", modelName, err)
+			return r.createErrorResponse(500, "Failed to process looper request"), nil
+		}
+		if found {
+			upstreamModel = r.resolveModelNameForEndpoint(modelName, endpointName)
+		}
+	}
 
-	modifiedBody, err := rewriteRequestModel(ctx.OriginalRequestBody, modelName)
+	modifiedBody, err := rewriteRequestModel(ctx.OriginalRequestBody, upstreamModel)
 	if err != nil {
 		logging.Errorf("[Looper] Failed to rewrite request body: %v", err)
 		return r.createErrorResponse(500, "Failed to process looper request: "+err.Error()), nil
@@ -194,6 +209,17 @@ func (r *OpenAIRouter) handleLooperInternalRequestWithPlugins(
 	if fallback != nil {
 		return fallback, nil
 	}
+	upstreamModel := modelName
+	if r.Config != nil {
+		_, endpointName, found, err := r.Config.SelectBestEndpointWithDetailsForModel(modelName)
+		if err != nil {
+			logging.Errorf("[Looper] Failed to resolve endpoint for model %s: %v", modelName, err)
+			return r.createErrorResponse(500, "Failed to process looper request"), nil
+		}
+		if found {
+			upstreamModel = r.resolveModelNameForEndpoint(modelName, endpointName)
+		}
+	}
 
 	r.prepareLooperInternalContext(decisionName, decision, modelName, ctx)
 	useReasoning, reasoningEffort := r.getReasoningInfoFromDecision(decision, modelName)
@@ -211,6 +237,7 @@ func (r *OpenAIRouter) handleLooperInternalRequestWithPlugins(
 	modifiedBody, err := r.modifyRequestBodyForLooper(
 		openAIRequest,
 		modelName,
+		upstreamModel,
 		decisionName,
 		useReasoning,
 		ctx,
