@@ -52,4 +52,9 @@ curl -X POST http://localhost:8280/api/v1/classify/complexity   -H "Content-Type
 python ../../scripts/eval_complexity_api.py --router-url http://localhost:8280 --max-samples 1000 --workers 4
 
 # 端到端测试
+
+## 单次测试
 curl -v http://localhost:9099/v1/chat/completions -H "Content-Type: application/json" -H "Authorization: Bearer sk-123456" -H "x-authz-user-id: demo-user" -H "x-authz-user-groups: premium-tier" -d '{ "model": "MoM", "messages": [{"role": "user", "content": "What is the derivative of x^2?"}], "reasoning_effort": "none"}'
+
+## 脚本
+python ../../test/routerarena/routerarena_e2e_benchmark.py --max-samples=100

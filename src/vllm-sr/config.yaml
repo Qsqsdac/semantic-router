@@ -4,7 +4,7 @@ listeners:
   - name: "http-8899"
     address: "0.0.0.0"
     port: 8899
-    timeout: "300s"
+    timeout: "1200s"
 
 providers:
   defaults:
@@ -197,14 +197,13 @@ routing:
     jailbreak:
       - name: "prompt_injection"
         method: hybrid
-        threshold: 0.8
-        include_history: true
+        threshold: 0.92
+        include_history: false
         description: "Detect common prompt-injection or jailbreak attempts."
         jailbreak_patterns:
           - ignore previous instructions
+          - system prompt
           - reveal the hidden prompt
-          - jailbreak mode
-          - do anything now
         benign_patterns:
           - explain the policy
           - summarize the safety rules
