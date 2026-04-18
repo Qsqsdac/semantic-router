@@ -53,8 +53,30 @@ python ../../scripts/eval_complexity_api.py --router-url http://localhost:8280 -
 
 # 端到端测试
 
+## Cerebras 中转模式
+
+当容器内直连上游 API 受网络策略影响时，先在宿主机启动本地中转，再让路由调用本地中转：
+
+```bash
+# 启动中转服务（监听 0.0.0.0:18080）
+python scripts/cerebras_openai_relay.py
+```
+
+中转健康检查：
+
+```bash
+curl -sS http://127.0.0.1:18080/healthz
+curl -sS http://127.0.0.1:18080/v1/models | head
+```
+
+中转脚本：
+- `scripts/cerebras_openai_relay.py`
+
+路由配置默认已指向：
+- `http://10.156.186.8:18080/v1`
+
 ## 单次测试
-curl -v http://localhost:9099/v1/chat/completions -H "Content-Type: application/json" -H "Authorization: Bearer sk-123456" -H "x-authz-user-id: demo-user" -H "x-authz-user-groups: premium-tier" -d '{ "model": "MoM", "messages": [{"role": "user", "content": "What is the derivative of x^2?"}], "reasoning_effort": "none"}'
+curl -v http://localhost:9099/v1/chat/completions -H "Content-Type: application/json" -H "Authorization: Bearer sk-123456" -H "x-authz-user-id: demo-user" -H "x-authz-user-groups: premium-tier" -d '{ "model": "MoM", "messages": [{"role": "user", "content": "What is the derivative of x^2?"}]}'
 
 ## 脚本
 python ../../test/routerarena/routerarena_e2e_benchmark.py --max-samples=100

@@ -27,6 +27,15 @@ PASSTHROUGH_ENV_RULES = (
     ("HF_HUB_CACHE", False),
     ("ANTHROPIC_API_KEY", True),
     ("OPENAI_API_KEY", True),
+    ("CEREBRAS_API_KEY", True),
+    ("HTTP_PROXY", False),
+    ("HTTPS_PROXY", False),
+    ("ALL_PROXY", False),
+    ("NO_PROXY", False),
+    ("http_proxy", False),
+    ("https_proxy", False),
+    ("all_proxy", False),
+    ("no_proxy", False),
     ("OPENCLAW_BASE_IMAGE", False),
 )
 

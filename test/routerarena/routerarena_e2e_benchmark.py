@@ -18,6 +18,7 @@ import argparse
 import concurrent.futures
 import json
 import math
+import os
 import re
 import string
 import time
@@ -41,6 +42,7 @@ DEFAULT_SPLITS = ["full", "robustness"]
 DEFAULT_AUTH_TOKEN = "sk-123456"
 DEFAULT_USER_ID = "demo-user"
 DEFAULT_USER_GROUPS = "premium-tier"
+DEFAULT_ROUTER_MODEL = os.getenv("ROUTER_MODEL", "MoM")
 
 SUPPORTED_SPLITS = {"sub_10", "full", "robustness"}
 
@@ -111,12 +113,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--reasoning-effort",
-        default="none",
-        help="Value for reasoning_effort in the request body",
+        default="",
+        help="Optional reasoning_effort value in the request body; empty disables this field.",
     )
     parser.add_argument(
         "--model",
-        default="MoM",
+        default=DEFAULT_ROUTER_MODEL,
         help="OpenAI-compatible model field used in the tutorial example",
     )
     return parser.parse_args()
@@ -533,8 +535,9 @@ def call_chat_completion(
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "reasoning_effort": reasoning_effort,
     }
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {auth_token}",
