@@ -15,7 +15,6 @@ The routing latency is read from the x-vsr-total-routing-latency-ms header.
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
 import json
 import math
 import os
@@ -45,6 +44,8 @@ DEFAULT_USER_GROUPS = "premium-tier"
 DEFAULT_ROUTER_MODEL = os.getenv("ROUTER_MODEL", "MoM")
 
 SUPPORTED_SPLITS = {"sub_10", "full", "robustness"}
+RETRY_SLEEP_SECONDS = 60
+MAX_CONSECUTIVE_FAILURES = 10
 
 
 def parse_args() -> argparse.Namespace:
@@ -78,12 +79,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Limit samples per split. 0 means no limit.",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=8,
-        help="Number of parallel HTTP workers",
     )
     parser.add_argument(
         "--timeout",
@@ -212,6 +207,46 @@ def load_routerarena_split(dataset_repo: str, split: str, max_samples: int) -> L
     if max_samples > 0:
         frame = frame.head(max_samples)
     return frame.to_dict(orient="records")
+
+
+def _global_index_of(row: Dict[str, Any]) -> str:
+    return str(row.get("Global Index") or row.get("global_index") or row.get("global index") or "")
+
+
+def load_aligned_splits(dataset_repo: str, splits: List[str], max_samples: int) -> Dict[str, List[Dict[str, Any]]]:
+    """Load requested splits.
+
+    If both full and robustness are requested, align sampling by global_index so both
+    splits use the same query IDs in the same order.
+    """
+    split_data: Dict[str, List[Dict[str, Any]]] = {}
+    for split in splits:
+        # Load without head slicing first; apply aligned slicing later.
+        split_data[split] = load_routerarena_split(dataset_repo, split, max_samples=0)
+
+    if "full" in split_data and "robustness" in split_data:
+        full_map = {_global_index_of(row): row for row in split_data["full"]}
+        robustness_rows = split_data["robustness"]
+
+        common_indices: List[str] = []
+        for row in robustness_rows:
+            gid = _global_index_of(row)
+            if gid and gid in full_map:
+                common_indices.append(gid)
+
+        if max_samples > 0:
+            common_indices = common_indices[:max_samples]
+
+        robustness_map = {_global_index_of(row): row for row in robustness_rows}
+        split_data["full"] = [full_map[gid] for gid in common_indices]
+        split_data["robustness"] = [robustness_map[gid] for gid in common_indices]
+
+    else:
+        for split in splits:
+            if max_samples > 0:
+                split_data[split] = split_data[split][:max_samples]
+
+    return split_data
 
 
 def resolve_dataset_name(row: Dict[str, Any]) -> str:
@@ -647,23 +682,46 @@ def evaluate_one(
 
     started = time.perf_counter()
     try:
-        response, http_elapsed_ms = call_chat_completion(
-            router_url,
-            endpoint,
-            model,
-            prompt,
-            auth_token,
-            user_id,
-            user_groups,
-            reasoning_effort,
-            timeout,
-        )
+        total_http_elapsed_ms = 0.0
+        response = None
+
+        for attempt in range(2):
+            response, http_elapsed_ms = call_chat_completion(
+                router_url,
+                endpoint,
+                model,
+                prompt,
+                auth_token,
+                user_id,
+                user_groups,
+                reasoning_effort,
+                timeout,
+            )
+            total_http_elapsed_ms += http_elapsed_ms
+
+            if response.status_code != 429:
+                break
+            if attempt == 0:
+                print(
+                    f"[warn] index={index} global_index={global_index} got HTTP 429; retrying in {RETRY_SLEEP_SECONDS}s"
+                )
+                time.sleep(RETRY_SLEEP_SECONDS)
+
+        assert response is not None
         parsed = parse_response_metadata(response)
-        task_score = METRIC_FUNCS.get(metric_name, code_score)(
-            parsed["response_text"],
-            ground_truth,
-            options=options,
-        )
+        task_score: Optional[float]
+        is_supported = False
+
+        if response.status_code == 200:
+            task_score = METRIC_FUNCS.get(metric_name, code_score)(
+                parsed["response_text"],
+                ground_truth,
+                options=options,
+            )
+            is_supported = task_score is not None
+        else:
+            # Non-200 responses are skipped from score/statistics by design.
+            task_score = None
 
         result.update(
             {
@@ -672,9 +730,9 @@ def evaluate_one(
                 "selected_model": parsed["selected_model"],
                 "response_text": parsed["response_text"],
                 "routing_latency_ms": parsed["routing_latency_ms"],
-                "http_elapsed_ms": http_elapsed_ms,
+                "http_elapsed_ms": total_http_elapsed_ms,
                 "task_score": task_score,
-                "is_supported": task_score is not None,
+                "is_supported": is_supported,
                 "raw_response": parsed["raw_response"],
             }
         )
@@ -711,8 +769,9 @@ def summarize_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     routing_latencies = [float(row["routing_latency_ms"]) for row in ok_rows if isinstance(row.get("routing_latency_ms"), (int, float))]
     http_latencies = [float(row["http_elapsed_ms"]) for row in ok_rows if isinstance(row.get("http_elapsed_ms"), (int, float))]
 
-    dataset_counter = Counter(row.get("dataset_name") for row in rows if row.get("dataset_name"))
-    metric_counter = Counter(row.get("metric_name") for row in rows if row.get("metric_name"))
+    # All summary metrics are based on HTTP 200 rows only.
+    dataset_counter = Counter(row.get("dataset_name") for row in ok_rows if row.get("dataset_name"))
+    metric_counter = Counter(row.get("metric_name") for row in ok_rows if row.get("metric_name"))
 
     return {
         "total_samples": len(rows),
@@ -779,59 +838,53 @@ def main() -> None:
     split_rows: Dict[str, List[Dict[str, Any]]] = {}
     split_summaries: Dict[str, Dict[str, Any]] = {}
 
+    split_samples = load_aligned_splits(args.dataset, args.splits, args.max_samples)
+
+    if "full" in split_samples and "robustness" in split_samples:
+        print(
+            f"[info] aligned sampling by global_index for full+robustness: {len(split_samples['full'])} pairs"
+        )
+
     for split in args.splits:
         print(f"[info] loading RouterArena split: {split}")
-        samples = load_routerarena_split(args.dataset, split, args.max_samples)
+        samples = split_samples.get(split, [])
         print(f"[info] split={split}, samples={len(samples)}")
 
         start = time.time()
-        rows: List[Optional[Dict[str, Any]]] = [None] * len(samples)
-        worker_count = max(1, int(args.workers))
+        rows: List[Dict[str, Any]] = []
 
-        if worker_count == 1:
-            for index, sample in enumerate(samples, start=1):
-                rows[index - 1] = evaluate_one(
-                    index,
-                    sample,
-                    args.router_url,
-                    args.endpoint,
-                    args.model,
-                    args.auth_token,
-                    args.user_id,
-                    args.user_groups,
-                    args.reasoning_effort,
-                    args.timeout,
+        consecutive_failures = 0
+
+        for index, sample in enumerate(samples, start=1):
+            row = evaluate_one(
+                index,
+                sample,
+                args.router_url,
+                args.endpoint,
+                args.model,
+                args.auth_token,
+                args.user_id,
+                args.user_groups,
+                args.reasoning_effort,
+                args.timeout,
+            )
+            rows.append(row)
+
+            if row.get("status") == "ok":
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+
+            if index % 100 == 0:
+                print(f"[progress] {split}: {index}/{len(samples)}")
+
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                print(
+                    f"[error] split={split}: reached {MAX_CONSECUTIVE_FAILURES} consecutive failures, stopping this split early"
                 )
-                if index % 100 == 0:
-                    print(f"[progress] {split}: {index}/{len(samples)}")
-        else:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-                future_map = {
-                    executor.submit(
-                        evaluate_one,
-                        index,
-                        sample,
-                        args.router_url,
-                        args.endpoint,
-                        args.model,
-                        args.auth_token,
-                        args.user_id,
-                        args.user_groups,
-                        args.reasoning_effort,
-                        args.timeout,
-                    ): index
-                    for index, sample in enumerate(samples, start=1)
-                }
-                completed = 0
-                for future in concurrent.futures.as_completed(future_map):
-                    index = future_map[future]
-                    rows[index - 1] = future.result()
-                    completed += 1
-                    if completed % 100 == 0:
-                        print(f"[progress] {split}: {completed}/{len(samples)}")
+                break
 
-        split_detail_rows = [row for row in rows if row is not None]
-        split_detail_rows.sort(key=lambda item: item["index"])
+        split_detail_rows = rows
         split_rows[split] = split_detail_rows
 
         detail_file = output_dir / f"routerarena_e2e_{split}_detail_{run_id}.jsonl"

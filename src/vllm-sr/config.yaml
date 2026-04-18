@@ -207,7 +207,7 @@ routing:
     complexity:
       - name: "needs_reasoning"
         threshold: 0.25
-        match_mode: keyword_fallback_emb     # complexity method
+        match_mode: keyword_fallback_emb     # *complexity
         keyword_mapping_path: complexity-assets/keyword_map.json
         description: "Escalate multi-step reasoning or synthesis-heavy prompts."
         hard:
@@ -581,7 +581,7 @@ global:
         use_cpu: true
         use_modernbert: false
         use_mmbert_32k: true
-        early_exit_enabled: true      # jailbreak method
+        early_exit_enabled: true      # *jailbreak 
         early_exit_layers: [4, 8, 12]
         early_exit_confidence: 0.8
         prompt_crop_enabled: true
@@ -597,7 +597,7 @@ global:
         skip_signals: [jailbreak, pii]
       classifier:
         domain:
-          intent_match_mode: fasttext_fallback_bert     # intent method
+          intent_match_mode: fasttext_fallback_bert     # *intent 
           intent_keyword_mapping_path: /app/intent-assets/intent_keyword_mapping.json
           intent_keyword_case_sensitive: false
           intent_fasttext_model_path: /app/intent-assets/models/intent_fasttext.bin
@@ -609,7 +609,7 @@ global:
         fact_check:
           model_ref: fact_check_classifier
           model_id: models/mmbert32k-factcheck-classifier-merged
-          mode: svm_only   # fact_check method
+          mode: svm_only   # *fact_check
           threshold: 0.65
           svm_fallback_threshold: 0.7
           use_cpu: true
