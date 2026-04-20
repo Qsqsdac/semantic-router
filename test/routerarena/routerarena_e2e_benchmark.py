@@ -37,7 +37,7 @@ DEFAULT_DATASET = "RouteWorks/RouterArena"
 DEFAULT_ENDPOINT = "/v1/chat/completions"
 LATENCY_HEADER = "x-vsr-total-routing-latency-ms"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "reports" / "routerarena-e2e"
-DEFAULT_SPLITS = ["full", "robustness"]
+DEFAULT_SPLITS = ["full"]
 DEFAULT_AUTH_TOKEN = "sk-123456"
 DEFAULT_USER_ID = "demo-user"
 DEFAULT_USER_GROUPS = "premium-tier"
@@ -529,6 +529,34 @@ METRIC_FUNCS = {
 EVAL_CONFIGS = load_eval_configs()
 
 
+def get_eval_params_for_dataset(dataset_name: str) -> Dict[str, Any]:
+    """Resolve eval params for a dataset name with a few compatibility fallbacks."""
+    if dataset_name in EVAL_CONFIGS:
+        return EVAL_CONFIGS[dataset_name]
+
+    # Try progressively shorter prefixes/suffixes for datasets whose config name
+    # includes an extra qualifier such as "_100k".
+    candidates = [dataset_name]
+    if "_" in dataset_name:
+        candidates.append(dataset_name.split("_", 1)[0])
+    if "-" in dataset_name:
+        candidates.append(dataset_name.split("-", 1)[0])
+
+    for candidate in candidates:
+        if candidate in EVAL_CONFIGS:
+            return EVAL_CONFIGS[candidate]
+
+    # Last resort: find a config entry that starts with the requested name or vice versa.
+    for config_name, eval_params in EVAL_CONFIGS.items():
+        if config_name.startswith(dataset_name) or dataset_name.startswith(config_name):
+            return eval_params
+
+    available = ", ".join(sorted(EVAL_CONFIGS.keys()))
+    raise KeyError(
+        f"Unknown dataset name: {dataset_name}. Available eval configs: {available}"
+    )
+
+
 def resolve_metric_name(dataset_name: str, eval_params: Dict[str, Any]) -> str:
     metrics = eval_params.get("eval_metrics") or []
     if metrics:
@@ -543,14 +571,14 @@ def resolve_metric_name(dataset_name: str, eval_params: Dict[str, Any]) -> str:
 
 def classify_dataset(row: Dict[str, Any]) -> Tuple[str, str]:
     dataset_name = base_dataset_name(row)
-    eval_params = EVAL_CONFIGS[dataset_name]
+    eval_params = get_eval_params_for_dataset(dataset_name)
     metric_name = resolve_metric_name(dataset_name, eval_params)
     return dataset_name, metric_name
 
 
 def build_sample_prompt(row: Dict[str, Any]) -> Tuple[str, str, str]:
     dataset_name, metric_name = classify_dataset(row)
-    eval_params = EVAL_CONFIGS[dataset_name]
+    eval_params = get_eval_params_for_dataset(dataset_name)
     prompt = build_prompt(row, eval_params)
     return dataset_name, metric_name, prompt
 

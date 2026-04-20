@@ -87,24 +87,6 @@ routing:
         fuzzy_match: true
         fuzzy_threshold: 2
 
-    embeddings:
-      - name: "technical_support"
-        threshold: 0.75
-        aggregation_method: max
-        candidates:
-          - how to configure the system
-          - installation guide
-          - troubleshooting steps
-          - error message explanation
-      - name: "account_management"
-        threshold: 0.72
-        aggregation_method: any
-        candidates:
-          - password reset
-          - account settings
-          - billing information
-          - subscription management
-
     domains:
       - name: "biology"
         description: "Biology and life sciences queries."
@@ -155,21 +137,6 @@ routing:
       - name: "no_fact_check_needed"
         description: "Creative prompts that do not need factual verification."
 
-    user_feedbacks:
-      - name: "wrong_answer"
-        description: "The user indicates the previous answer was incorrect."
-      - name: "need_clarification"
-        description: "The user asks for a clearer or more detailed answer."
-
-    preferences:
-      - name: "terse_answers"
-        description: "Users who prefer short, direct responses."
-        examples:
-          - keep it concise
-          - bullet points only
-          - answer in one paragraph
-        threshold: 0.7
-
     context:
       - name: "long_context"
         min_tokens: 32K
@@ -207,7 +174,7 @@ routing:
     complexity:
       - name: "needs_reasoning"
         threshold: 0.25
-        match_mode: keyword_fallback_emb     # *complexity
+        match_mode: emb     # *complexity
         keyword_mapping_path: complexity-assets/keyword_map.json
         description: "Escalate multi-step reasoning or synthesis-heavy prompts."
         hard:
@@ -231,14 +198,6 @@ routing:
               name: long_context
             - type: domain
               name: "computer science"
-
-    pii:
-      - name: "restricted_pii"
-        threshold: 0.85
-        include_history: true
-        pii_types_allowed:
-          - EMAIL_ADDRESS
-        description: "Sensitive prompts where only low-risk identifiers may pass through."
 
   decisions:
     - name: "jailbreak_block_route"
@@ -293,30 +252,6 @@ routing:
       algorithm:
         type: static
 
-    - name: "support_router_dc_route"
-      description: "Embedding-driven support route with RouterDC selection."
-      priority: 220
-      rules:
-        operator: AND
-        conditions:
-          - type: embedding
-            name: "technical_support"
-      modelRefs:
-        - model: MoM
-          use_reasoning: false
-        - model: MoM-large
-          use_reasoning: true
-      algorithm:
-        type: router_dc
-        router_dc:
-          temperature: 0.2
-          dimension_size: 384
-          min_similarity: 0.7
-          use_query_contrastive: true
-          use_model_contrastive: true
-          require_descriptions: true
-          use_capabilities: true
-
     - name: "computer_science_complex_route"
       description: "Complex computer science prompts route to stronger model."
       priority: 210
@@ -362,31 +297,6 @@ routing:
           discount_factor: 0.9
           use_logprob_verification: true
 
-    - name: "terse_elo_route"
-      description: "Personalized terse-answer route using Elo selection."
-      priority: 190
-      rules:
-        operator: AND
-        conditions:
-          - type: preference
-            name: "terse_answers"
-      modelRefs:
-        - model: MoM
-          use_reasoning: false
-        - model: MoM-large
-          use_reasoning: false
-      algorithm:
-        type: elo
-        elo:
-          initial_rating: 1200
-          k_factor: 32
-          category_weighted: true
-          decay_factor: 0.97
-          min_comparisons: 10
-          cost_scaling_factor: 0.15
-          storage_path: state/elo-selection.json
-          auto_save_interval: 5m
-
     - name: "admin_static_route"
       description: "Admin traffic prefers stronger model."
       priority: 185
@@ -418,22 +328,6 @@ routing:
           tpot_percentile: 90
           ttft_percentile: 95
           description: "Balance throughput and first-token latency for long prompts."
-
-    - name: "clarification_kmeans_route"
-      description: "KMeans route for clarification requests."
-      priority: 170
-      rules:
-        operator: AND
-        conditions:
-          - type: user_feedback
-            name: "need_clarification"
-      modelRefs:
-        - model: MoM
-          use_reasoning: false
-        - model: MoM-large
-          use_reasoning: true
-      algorithm:
-        type: kmeans
 
     - name: "safe_only_svm_route"
       description: "SVM route that only matches when prompt-injection signals are absent."
@@ -581,10 +475,10 @@ global:
         use_cpu: true
         use_modernbert: false
         use_mmbert_32k: true
-        early_exit_enabled: true      # *jailbreak 
+        early_exit_enabled: false      # *jailbreak 
         early_exit_layers: [4, 8, 12]
         early_exit_confidence: 0.8
-        prompt_crop_enabled: true
+        prompt_crop_enabled: false
         prompt_crop_max_chars: 1024
         prompt_crop_head_chars: 512
         prompt_crop_tail_chars: 512
@@ -594,22 +488,22 @@ global:
         enabled: true
         max_tokens: 4096
         min_length: 512
-        skip_signals: [jailbreak, pii]
+        skip_signals: [jailbreak]
       classifier:
         domain:
-          intent_match_mode: fasttext_fallback_bert     # *intent 
+          intent_match_mode: bert     # *intent 
           intent_keyword_mapping_path: /app/intent-assets/intent_keyword_mapping.json
           intent_keyword_case_sensitive: false
           intent_fasttext_model_path: /app/intent-assets/models/intent_fasttext.bin
           intent_fasttext_binary_path: /app/intent-assets/bin/fasttext.real
-          intent_fasttext_threshold: 0.6
+          intent_fasttext_threshold: 0.8
           intent_fasttext_timeout_seconds: 2
       hallucination_mitigation:
         enabled: true
         fact_check:
           model_ref: fact_check_classifier
           model_id: models/mmbert32k-factcheck-classifier-merged
-          mode: svm_only   # *fact_check
+          mode: bert   # *fact_check
           threshold: 0.65
           svm_fallback_threshold: 0.7
           use_cpu: true
