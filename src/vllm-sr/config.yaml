@@ -4,57 +4,177 @@ listeners:
   - name: "http-8899"
     address: "0.0.0.0"
     port: 8899
-    timeout: "300s"
+    timeout: "1200s"
 
 providers:
   defaults:
     default_model: "MoM"
   models:
     - name: "MoM"
-      provider_model_id: "qwen3.5:0.8b"
+      provider_model_id: "llama3.1-8b"
+      external_model_ids:
+        openai: llama3.1-8b
+        vllm: llama3.1-8b
       backend_refs:
         - name: "primary"
-          endpoint: "10.156.186.8:8080"
+          endpoint: "10.156.186.8:18080"
           protocol: "http"
           type: "openai"
-          base_url: "http://10.156.186.8:8080/v1"
+          base_url: "http://10.156.186.8:18080/v1"
           provider: "openai"
           auth_header: "Authorization"
           auth_prefix: "Bearer"
           api_key: "sk-123456"
-          extra_headers:
-            Authorization: "Bearer sk-123456"
           weight: 100
+      pricing:
+        currency: CNY
+        prompt_per_1m: 1
+        completion_per_1m: 3
     - name: "MoM-large"
-      provider_model_id: "qwen3.5:122b"
+      provider_model_id: "qwen-3-235b-a22b-instruct-2507"
+      external_model_ids:
+        openai: qwen-3-235b-a22b-instruct-2507
+        vllm: qwen-3-235b-a22b-instruct-2507
       backend_refs:
         - name: "primary"
-          endpoint: "10.156.186.8:8080"
+          endpoint: "10.156.186.8:18080"
           protocol: "http"
           type: "openai"
-          base_url: "http://10.156.186.8:8080/v1"
+          base_url: "http://10.156.186.8:18080/v1"
           provider: "openai"
           auth_header: "Authorization"
           auth_prefix: "Bearer"
           api_key: "sk-123456"
-          extra_headers:
-            Authorization: "Bearer sk-123456"
           weight: 100
+      pricing:
+        currency: CNY
+        prompt_per_1m: 3.5
+        completion_per_1m: 7
 
 routing:
   modelCards:
     - name: "MoM"
       description: "Fast default text model"
-      capabilities: ["chat", "reasoning"]
+      param_size: "9B"
+      context_window_size: 262144
+      capabilities: ["chat", "reasoning", "tools"]
     - name: "MoM-large"
-      description: "Higher quality model for complex reasoning requests"
+      description: "Higher quality model for complex, risky, or verification-heavy requests"
+      param_size: "35B"
+      context_window_size: 262144
       capabilities: ["chat", "reasoning", "long-context"]
 
   signals:
+    keywords:
+      - name: "code_keywords"
+        operator: OR
+        method: bm25
+        keywords: ["code", "function", "debug", "algorithm", "refactor"]
+        case_sensitive: false
+        bm25_threshold: 0.1
+      - name: "urgent_keywords"
+        operator: OR
+        method: ngram
+        keywords: ["urgent", "immediate", "asap", "emergency"]
+        case_sensitive: false
+        ngram_threshold: 0.4
+        ngram_arity: 3
+      - name: "fuzzy_sensitive_keywords"
+        operator: OR
+        method: regex
+        keywords: ["social security", "credit card", "password", "api key"]
+        case_sensitive: false
+        fuzzy_match: true
+        fuzzy_threshold: 2
+
+    domains:
+      - name: "biology"
+        description: "Biology and life sciences queries."
+        mmlu_categories: [biology]
+      - name: "business"
+        description: "Business and management queries."
+        mmlu_categories: [business]
+      - name: "chemistry"
+        description: "Chemistry queries."
+        mmlu_categories: [chemistry]
+      - name: "computer science"
+        description: "Computer science and software engineering queries."
+        mmlu_categories: ["computer science"]
+      - name: "economics"
+        description: "Economics and finance theory queries."
+        mmlu_categories: [economics]
+      - name: "engineering"
+        description: "Engineering and applied technical queries."
+        mmlu_categories: [engineering]
+      - name: "health"
+        description: "Health and medical queries."
+        mmlu_categories: [health]
+      - name: "history"
+        description: "History queries."
+        mmlu_categories: [history]
+      - name: "law"
+        description: "Legal and regulatory queries."
+        mmlu_categories: [law]
+      - name: "math"
+        description: "Math and quantitative reasoning queries."
+        mmlu_categories: [math]
+      - name: "philosophy"
+        description: "Philosophy and ethics queries."
+        mmlu_categories: [philosophy]
+      - name: "physics"
+        description: "Physics queries."
+        mmlu_categories: [physics]
+      - name: "psychology"
+        description: "Psychology and behavior queries."
+        mmlu_categories: [psychology]
+      - name: "other"
+        description: "General fallback traffic."
+        mmlu_categories: [other]
+
+    fact_check:
+      - name: "needs_fact_check"
+        description: "Prompts with factual claims that should be verified."
+      - name: "no_fact_check_needed"
+        description: "Creative prompts that do not need factual verification."
+
+    context:
+      - name: "long_context"
+        min_tokens: 32K
+        max_tokens: 256K
+        description: "Requests that need larger effective context windows."
+
+    role_bindings:
+      - name: "admin"
+        description: "Requests from platform administrators."
+        role: admin
+        subjects:
+          - kind: Group
+            name: platform-admins
+      - name: "premium_user"
+        description: "Requests from paid end users."
+        role: premium_user
+        subjects:
+          - kind: Group
+            name: premium-tier
+
+    jailbreak:
+      - name: "prompt_injection"
+        method: hybrid
+        threshold: 0.92
+        include_history: false
+        description: "Detect common prompt-injection or jailbreak attempts."
+        jailbreak_patterns:
+          - ignore previous instructions
+          - system prompt
+          - reveal the hidden prompt
+        benign_patterns:
+          - explain the policy
+          - summarize the safety rules
+
     complexity:
       - name: "needs_reasoning"
         threshold: 0.25
-        match_mode: emb
+        match_mode: emb     # *complexity: keyword_fallback_emb
         keyword_mapping_path: complexity-assets/keyword_map.json
         description: "Escalate multi-step reasoning or synthesis-heavy prompts."
         hard:
@@ -71,11 +191,195 @@ routing:
             - simple rewrite
             - paraphrase this sentence
             - summarize this passage in one sentence
+        composer:
+          operator: OR
+          conditions:
+            - type: context
+              name: long_context
+            - type: domain
+              name: "computer science"
 
   decisions:
+    - name: "jailbreak_block_route"
+      description: "Jailbreak traffic routes to stronger model and is blocked by plugin."
+      priority: 300
+      rules:
+        operator: AND
+        conditions:
+          - type: jailbreak
+            name: "prompt_injection"
+      modelRefs:
+        - model: MoM-large
+          use_reasoning: true
+      algorithm:
+        type: static
+
+    - name: "legal_confidence_route"
+      description: "Confidence-routed legal and factual traffic."
+      priority: 260
+      rules:
+        operator: OR
+        conditions:
+          - type: domain
+            name: "law"
+          - type: fact_check
+            name: "needs_fact_check"
+      modelRefs:
+        - model: MoM
+          use_reasoning: true
+          weight: 0.4
+        - model: MoM-large
+          use_reasoning: true
+          weight: 0.6
+      algorithm:
+        type: static
+
+    - name: "health_ratings_route"
+      description: "Ratings-based route for health requests that need fact verification."
+      priority: 240
+      rules:
+        operator: AND
+        conditions:
+          - type: domain
+            name: "health"
+          - type: fact_check
+            name: "needs_fact_check"
+      modelRefs:
+        - model: MoM
+          use_reasoning: true
+        - model: MoM-large
+          use_reasoning: true
+      algorithm:
+        type: static
+
+    - name: "computer_science_complex_route"
+      description: "Complex computer science prompts route to stronger model."
+      priority: 210
+      rules:
+        operator: AND
+        conditions:
+          - type: domain
+            name: "computer science"
+          - type: complexity
+            name: "needs_reasoning"
+      modelRefs:
+        - model: MoM-large
+          use_reasoning: true
+      algorithm:
+        type: static
+      plugins:
+        - type: semantic-cache
+          configuration:
+            enabled: true
+            similarity_threshold: 0.85
+            ttl_seconds: 7200
+
+    - name: "urgent_automix_route"
+      description: "Cost-aware urgent handling with AutoMix."
+      priority: 200
+      rules:
+        operator: AND
+        conditions:
+          - type: keyword
+            name: "urgent_keywords"
+      modelRefs:
+        - model: MoM
+          use_reasoning: false
+        - model: MoM-large
+          use_reasoning: true
+      algorithm:
+        type: automix
+        automix:
+          verification_threshold: 0.78
+          max_escalations: 2
+          cost_aware_routing: true
+          cost_quality_tradeoff: 0.35
+          discount_factor: 0.9
+          use_logprob_verification: true
+
+    - name: "admin_static_route"
+      description: "Admin traffic prefers stronger model."
+      priority: 185
+      rules:
+        operator: AND
+        conditions:
+          - type: authz
+            name: "admin"
+      modelRefs:
+        - model: MoM-large
+          use_reasoning: true
+      algorithm:
+        type: static
+
+    - name: "long_context_latency_route"
+      description: "Long-context route with latency-aware policy."
+      priority: 180
+      rules:
+        operator: AND
+        conditions:
+          - type: context
+            name: long_context
+      modelRefs:
+        - model: MoM-large
+          use_reasoning: true
+      algorithm:
+        type: latency_aware
+        latency_aware:
+          tpot_percentile: 90
+          ttft_percentile: 95
+          description: "Balance throughput and first-token latency for long prompts."
+
+    - name: "safe_only_svm_route"
+      description: "SVM route that only matches when prompt-injection signals are absent."
+      priority: 165
+      rules:
+        operator: NOT
+        conditions:
+          - type: jailbreak
+            name: "prompt_injection"
+      modelRefs:
+        - model: MoM
+          use_reasoning: false
+      algorithm:
+        type: svm
+
+    - name: "domain_large_model_route"
+      description: "Complex intent categories route to large model."
+      priority: 150
+      rules:
+        operator: OR
+        conditions:
+          - type: domain
+            name: "biology"
+          - type: domain
+            name: "chemistry"
+          - type: domain
+            name: "computer science"
+          - type: domain
+            name: "engineering"
+          - type: domain
+            name: "health"
+          - type: domain
+            name: "law"
+          - type: domain
+            name: "math"
+          - type: domain
+            name: "physics"
+      modelRefs:
+        - model: MoM-large
+          use_reasoning: true
+      algorithm:
+        type: static
+      plugins:
+        - type: semantic-cache
+          configuration:
+            enabled: true
+            similarity_threshold: 0.85
+            ttl_seconds: 7200
+
     - name: "complexity_route"
       description: "Requests needing reasoning route to the stronger model."
-      priority: 200
+      priority: 140
       rules:
         operator: AND
         conditions:
@@ -86,9 +390,45 @@ routing:
           use_reasoning: true
       algorithm:
         type: static
+      plugins:
+        - type: semantic-cache
+          configuration:
+            enabled: true
+            similarity_threshold: 0.85
+            ttl_seconds: 7200
+
+    - name: "domain_small_model_route"
+      description: "Remaining intent categories route to small model."
+      priority: 120
+      rules:
+        operator: OR
+        conditions:
+          - type: domain
+            name: "business"
+          - type: domain
+            name: "economics"
+          - type: domain
+            name: "history"
+          - type: domain
+            name: "philosophy"
+          - type: domain
+            name: "psychology"
+          - type: domain
+            name: "other"
+      modelRefs:
+        - model: MoM
+          use_reasoning: false
+      algorithm:
+        type: static
+      plugins:
+        - type: semantic-cache
+          configuration:
+            enabled: true
+            similarity_threshold: 0.85
+            ttl_seconds: 7200
 
     - name: "default_route"
-      description: "Fallback for prompts not requiring complexity escalation."
+      description: "Final fallback route."
       priority: 100
       rules:
         operator: AND
@@ -98,13 +438,22 @@ routing:
           use_reasoning: false
       algorithm:
         type: static
+      plugins:
+        - type: semantic-cache
+          configuration:
+            enabled: true
+            similarity_threshold: 0.85
+            ttl_seconds: 7200
 
 global:
+  router:
+    config_source: file
+    strategy: priority
   model_catalog:
     embeddings:
       semantic:
         qwen3_model_path: models/mom-embedding-pro
-        gemma_model_path: models/mom-embedding-flash
+        gemma_model_path: ""
         mmbert_model_path: models/mom-embedding-ultra
         multimodal_model_path: models/mom-embedding-multimodal
         bert_model_path: models/mom-embedding-light
@@ -117,6 +466,51 @@ global:
           enable_soft_matching: true
           top_k: 1
           min_score_threshold: 0.45
+    modules:
+      prompt_guard:
+        enabled: true
+        model_ref: prompt_guard
+        model_id: models/mmbert32k-jailbreak-detector-merged
+        threshold: 0.7
+        use_cpu: true
+        use_modernbert: false
+        use_mmbert_32k: true
+        early_exit_enabled: false      # *jailbreak 
+        early_exit_layers: [4, 8, 12]
+        early_exit_confidence: 0.8
+        prompt_crop_enabled: false
+        prompt_crop_max_chars: 1024
+        prompt_crop_head_chars: 512
+        prompt_crop_tail_chars: 512
+        jailbreak_mapping_path: models/mmbert32k-jailbreak-detector-merged/jailbreak_type_mapping.json
+        use_vllm: false
+      prompt_compression:
+        enabled: true
+        max_tokens: 4096
+        min_length: 512
+        skip_signals: [jailbreak]
+      classifier:
+        domain:
+          intent_match_mode: bert   # *intent: fasttext_fallback_bert / fasttext_only
+          intent_keyword_mapping_path: /app/intent-assets/intent_keyword_mapping.json
+          intent_keyword_case_sensitive: false
+          intent_fasttext_model_path: /app/intent-assets/models/intent_fasttext.bin
+          intent_fasttext_binary_path: /app/intent-assets/bin/fasttext.real
+          intent_fasttext_threshold: 0.8
+          intent_fasttext_timeout_seconds: 2
+      hallucination_mitigation:
+        enabled: true
+        fact_check:
+          model_ref: fact_check_classifier
+          model_id: models/mmbert32k-factcheck-classifier-merged
+          mode: bert   # *fact_check: svm_only
+          threshold: 0.65
+          svm_fallback_threshold: 0.7
+          use_cpu: true
+          use_mmbert_32k: true
   stores:
     semantic_cache:
+      # Simple global switch for semantic cache: true=on, false=off.
       enabled: false
+      similarity_threshold: 0.85
+      ttl_seconds: 7200
