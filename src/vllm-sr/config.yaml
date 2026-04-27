@@ -55,13 +55,13 @@ routing:
   modelCards:
     - name: "MoM"
       description: "Fast default text model"
-      param_size: "9B"
-      context_window_size: 262144
+      param_size: "8B"
+      context_window_size: 8192
       capabilities: ["chat", "reasoning", "tools"]
     - name: "MoM-large"
       description: "Higher quality model for complex, risky, or verification-heavy requests"
-      param_size: "35B"
-      context_window_size: 262144
+      param_size: "235B"
+      context_window_size: 65536
       capabilities: ["chat", "reasoning", "long-context"]
 
   signals:
