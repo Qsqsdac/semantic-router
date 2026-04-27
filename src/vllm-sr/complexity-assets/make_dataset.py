@@ -79,16 +79,16 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument("--tokenizer", default="auto")
 	parser.add_argument("--hf-endpoint", default=DEFAULT_HF_ENDPOINT)
 	parser.add_argument(
-		"--easy-max",
-		type=int,
-		default=DEFAULT_EASY_MAX,
-		help="easy when output token count <= this value",
+		"--easy-threshold",
+		type=float,
+		default=0.33,
+		help="complexity score threshold for easy (score < threshold)",
 	)
 	parser.add_argument(
-		"--hard-min",
-		type=int,
-		default=DEFAULT_HARD_MIN,
-		help="hard when output token count >= this value",
+		"--hard-threshold",
+		type=float,
+		default=0.66,
+		help="complexity score threshold for hard (score >= threshold)",
 	)
 	parser.add_argument(
 		"--fallback-datasets",
@@ -247,12 +247,6 @@ class TokenCounter:
 		return len(TOKEN_SPLIT_RE.findall(text))
 
 
-def classify_output_length(token_count: int, easy_max: int, hard_min: int) -> str:
-	if token_count >= hard_min:
-		return "hard"
-	if token_count <= easy_max:
-		return "easy"
-	return "medium"
 
 
 def extract_request_and_response(sample: Dict[str, Any]) -> Tuple[str, str]:
@@ -286,6 +280,69 @@ def extract_request_and_response(sample: Dict[str, Any]) -> Tuple[str, str]:
 		response = first_text(sample, ("answer", "completion", "output", "chosen", "response"))
 
 	return normalize_text(request), normalize_text(response)
+
+
+def content_based_complexity(output: str) -> float:
+	"""
+	Calculate content-based complexity score (0-1) based on reasoning steps,
+	logic connectors, structure, and code presence.
+	Does not include length component - that is handled separately in classify_complexity.
+	"""
+	score = 0.0
+	output_lower = output.lower()
+	
+	# 1. Reasoning steps (keyword detection) - weight: 0.3
+	step_keywords = [
+		'first', 'second', 'third', 'finally', 'therefore', 'because',
+		'step 1', 'step 2', 'step 3', 'step:', 'next,', 'then,',
+	]
+	step_count = sum(1 for kw in step_keywords if kw in output_lower)
+	score += 0.3 * min(step_count / 5.0, 1.0)
+	
+	# 2. Logic connector density (proxy for reasoning complexity) - weight: 0.2
+	logic_connectors = [
+		'since', 'thus', 'therefore', 'if', 'then', 'although',
+		'however', 'moreover', 'furthermore', 'additionally',
+		'in conclusion', 'as a result', 'because of',
+	]
+	connector_count = sum(1 for c in logic_connectors if c in output_lower)
+	connector_density = connector_count / (len(output.split()) + 1)
+	score += 0.2 * min(connector_density * 50, 1.0)  # Assume ideal density ~2%
+	
+	# 3. Structured output (bullets, numbering, formulas) - weight: 0.25
+	has_bullets = bool(re.search(r'\d+\.|•|\- |\* ', output))
+	has_formulas = bool(re.search(r'\$.*\$', output))  # LaTeX formulas
+	structure_score = (has_bullets + has_formulas) / 2.0
+	score += 0.25 * structure_score
+	
+	# 4. Code/special formats - weight: 0.25
+	has_code = bool(re.search(r'```', output))
+	score += 0.25 * float(has_code)
+	
+	return min(score, 1.0)
+
+
+def classify_complexity(
+	output: str,
+	easy_threshold: float,
+	hard_threshold: float,
+) -> str:
+	"""
+	Classify output complexity based on integrated content and length features.
+	Returns 'easy', 'medium', or 'hard'.
+	"""
+	content_score = content_based_complexity(output)
+	
+	# Combine content score with length component
+	length_score = min(len(output.split()) / 300.0, 1.0)
+	final_score = 0.7 * content_score + 0.3 * length_score
+	
+	if final_score < easy_threshold:
+		return "easy"
+	elif final_score < hard_threshold:
+		return "medium"
+	else:
+		return "hard"
 
 
 def load_with_datasets(dataset_name: str, split: str, seed: int) -> Iterable[Dict[str, Any]]:
@@ -407,16 +464,15 @@ def build_records(
 	samples: Iterable[Dict[str, Any]],
 	token_counter: TokenCounter,
 	target_count: int,
-	easy_max: int,
-	hard_min: int,
+	easy_threshold: float,
+	hard_threshold: float,
 ) -> List[Dict[str, Any]]:
 	records: List[Dict[str, Any]] = []
 	for sample in samples:
 		request, response = extract_request_and_response(sample)
 		if not request or not response:
 			continue
-		token_count = token_counter.count(response)
-		label = classify_output_length(token_count, easy_max, hard_min)
+		label = classify_complexity(response, easy_threshold, hard_threshold)
 		records.append({"request": request, "label": label})
 		if len(records) >= target_count:
 			break
@@ -450,10 +506,12 @@ def main() -> None:
 		raise SystemExit("--train-ratio must be between 0 and 1")
 	if args.sample_size < 2:
 		raise SystemExit("--sample-size must be at least 2")
-	if args.easy_max < 0:
-		raise SystemExit("--easy-max must be >= 0")
-	if args.hard_min <= args.easy_max:
-		raise SystemExit("--hard-min must be greater than --easy-max")
+	if args.easy_threshold < 0 or args.easy_threshold > 1:
+		raise SystemExit("--easy-threshold must be between 0 and 1")
+	if args.hard_threshold < 0 or args.hard_threshold > 1:
+		raise SystemExit("--hard-threshold must be between 0 and 1")
+	if args.hard_threshold <= args.easy_threshold:
+		raise SystemExit("--hard-threshold must be greater than --easy-threshold")
 
 	if args.hf_endpoint:
 		os.environ["HF_ENDPOINT"] = args.hf_endpoint
@@ -473,7 +531,7 @@ def main() -> None:
 	print(f"[info] fallback_datasets={fallback_datasets}")
 	print(f"[info] tokenizer={selected_tokenizer}")
 	print(
-		f"[info] thresholds: easy<= {args.easy_max}, medium=({args.easy_max + 1}..{args.hard_min - 1}), hard>= {args.hard_min}"
+		f"[info] complexity thresholds: easy<{args.easy_threshold:.2f}, medium=[{args.easy_threshold:.2f},{args.hard_threshold:.2f}), hard>={args.hard_threshold:.2f}"
 	)
 
 	samples = iter_samples(
@@ -489,8 +547,8 @@ def main() -> None:
 		samples,
 		token_counter,
 		args.sample_size,
-		args.easy_max,
-		args.hard_min,
+		args.easy_threshold,
+		args.hard_threshold,
 	)
 
 	if len(records) < args.sample_size:
