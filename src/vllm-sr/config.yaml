@@ -329,20 +329,6 @@ routing:
           ttft_percentile: 95
           description: "Balance throughput and first-token latency for long prompts."
 
-    - name: "safe_only_svm_route"
-      description: "SVM route that only matches when prompt-injection signals are absent."
-      priority: 165
-      rules:
-        operator: NOT
-        conditions:
-          - type: jailbreak
-            name: "prompt_injection"
-      modelRefs:
-        - model: MoM
-          use_reasoning: false
-      algorithm:
-        type: svm
-
     - name: "domain_large_model_route"
       description: "Complex intent categories route to large model."
       priority: 150
