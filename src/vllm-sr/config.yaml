@@ -174,7 +174,7 @@ routing:
     complexity:
       - name: "needs_reasoning"
         threshold: 0.25
-        match_mode: emb     # *complexity: keyword_fallback_emb
+        match_mode: keyword_fallback_emb     # *complexity: keyword_fallback_emb
         keyword_mapping_path: complexity-assets/keyword_map.json
         description: "Escalate multi-step reasoning or synthesis-heavy prompts."
         hard:
@@ -475,10 +475,10 @@ global:
         use_cpu: true
         use_modernbert: false
         use_mmbert_32k: true
-        early_exit_enabled: false      # *jailbreak 
-        early_exit_layers: [4, 8, 12]
+        early_exit_enabled: true      # *jailbreak 
+        early_exit_layers: [4, 8]
         early_exit_confidence: 0.8
-        prompt_crop_enabled: false
+        prompt_crop_enabled: true
         prompt_crop_max_chars: 1024
         prompt_crop_head_chars: 512
         prompt_crop_tail_chars: 512
@@ -491,7 +491,7 @@ global:
         skip_signals: [jailbreak]
       classifier:
         domain:
-          intent_match_mode: bert   # *intent: fasttext_fallback_bert / fasttext_only
+          intent_match_mode: fasttext_only   # *intent: fasttext_fallback_bert / fasttext_only
           intent_keyword_mapping_path: /app/intent-assets/intent_keyword_mapping.json
           intent_keyword_case_sensitive: false
           intent_fasttext_model_path: /app/intent-assets/models/intent_fasttext.bin
@@ -503,7 +503,7 @@ global:
         fact_check:
           model_ref: fact_check_classifier
           model_id: models/mmbert32k-factcheck-classifier-merged
-          mode: bert   # *fact_check: svm_only
+          mode: svm_only   # *fact_check: svm_only
           threshold: 0.65
           svm_fallback_threshold: 0.7
           use_cpu: true
