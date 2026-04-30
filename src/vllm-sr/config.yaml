@@ -320,8 +320,12 @@ routing:
           - type: context
             name: long_context
       modelRefs:
+        - model: MoM
+          use_reasoning: true
+          weight: 0.3
         - model: MoM-large
           use_reasoning: true
+          weight: 0.7
       algorithm:
         type: latency_aware
         latency_aware:
