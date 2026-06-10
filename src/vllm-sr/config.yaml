@@ -11,40 +11,44 @@ providers:
     default_model: "MoM"
   models:
     - name: "MoM"
-      provider_model_id: "llama3.1-8b"
+      provider_model_id: "qwen3.5:9b"
       external_model_ids:
-        openai: llama3.1-8b
-        vllm: llama3.1-8b
+        openai: qwen3.5:9b
+        vllm: qwen3.5:9b
       backend_refs:
         - name: "primary"
-          endpoint: "10.156.186.8:18080"
+          endpoint: "10.156.186.8:8080"
           protocol: "http"
           type: "openai"
-          base_url: "http://10.156.186.8:18080/v1"
+          base_url: "http://10.156.186.8:8080/v1"
           provider: "openai"
           auth_header: "Authorization"
           auth_prefix: "Bearer"
           api_key: "sk-123456"
+          extra_headers:
+            Authorization: "Bearer sk-123456"
           weight: 100
       pricing:
         currency: CNY
         prompt_per_1m: 1
         completion_per_1m: 3
     - name: "MoM-large"
-      provider_model_id: "qwen-3-235b-a22b-instruct-2507"
+      provider_model_id: "qwen3.5:35b"
       external_model_ids:
-        openai: qwen-3-235b-a22b-instruct-2507
-        vllm: qwen-3-235b-a22b-instruct-2507
+        openai: qwen3.5:35b
+        vllm: qwen3.5:35b
       backend_refs:
         - name: "primary"
-          endpoint: "10.156.186.8:18080"
+          endpoint: "10.156.186.8:8080"
           protocol: "http"
           type: "openai"
-          base_url: "http://10.156.186.8:18080/v1"
+          base_url: "http://10.156.186.8:8080/v1"
           provider: "openai"
           auth_header: "Authorization"
           auth_prefix: "Bearer"
           api_key: "sk-123456"
+          extra_headers:
+            Authorization: "Bearer sk-123456"
           weight: 100
       pricing:
         currency: CNY
@@ -55,13 +59,13 @@ routing:
   modelCards:
     - name: "MoM"
       description: "Fast default text model"
-      param_size: "8B"
-      context_window_size: 8192
+      param_size: "9B"
+      context_window_size: 262144
       capabilities: ["chat", "reasoning", "tools"]
     - name: "MoM-large"
       description: "Higher quality model for complex, risky, or verification-heavy requests"
-      param_size: "235B"
-      context_window_size: 65536
+      param_size: "35B"
+      context_window_size: 262144
       capabilities: ["chat", "reasoning", "long-context"]
 
   signals:

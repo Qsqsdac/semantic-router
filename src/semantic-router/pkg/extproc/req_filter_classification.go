@@ -255,7 +255,8 @@ func (r *OpenAIRouter) performDecisionEvaluation(originalModel string, userConte
 		// Pass categoryName for ML selectors to create feature vectors with category one-hot encoding
 		selectedModelRef, usedMethod := r.selectModelFromCandidates(result.Decision.ModelRefs, decisionName, userContent, result.Decision.Algorithm, categoryName)
 
-		// Use LoRA name if specified, otherwise use the base model name
+		// Use LoRA name if specified, otherwise use the base model name.
+		// Then resolve to provider_model_id for consistent logging/response.
 		selectedModel = selectedModelRef.Model
 		if selectedModelRef.LoRAName != "" {
 			selectedModel = selectedModelRef.LoRAName
@@ -264,6 +265,13 @@ func (r *OpenAIRouter) performDecisionEvaluation(originalModel string, userConte
 		} else {
 			logging.Infof("Selected model from decision %s: %s using %s selection",
 				decisionName, selectedModel, usedMethod)
+		}
+		// Resolve to provider_model_id so the response header x-vsr-selected-model
+		// matches the model field in upstream responses (which uses provider_model_id).
+		// external_model_ids for the default "vllm" type maps name -> provider_model_id.
+		if resolved := r.Config.ResolveExternalModelID(selectedModel, "vllm"); resolved != selectedModel {
+			logging.Infof("Mapped model name '%s' -> provider_model_id '%s' for consistency", selectedModel, resolved)
+			selectedModel = resolved
 		}
 		ctx.VSRSelectedModel = selectedModel
 		ctx.VSRSelectionMethod = usedMethod
