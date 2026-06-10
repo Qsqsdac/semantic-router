@@ -633,11 +633,23 @@ def parse_response_metadata(response: requests.Response) -> Dict[str, Any]:
     except (TypeError, ValueError):
         routing_latency_ms = None
 
+    completion_tokens: Optional[int] = None
+    if isinstance(payload, dict) and "usage" in payload:
+        usage = payload["usage"]
+        if isinstance(usage, dict):
+            raw = usage.get("completion_tokens")
+            if raw is not None:
+                try:
+                    completion_tokens = int(raw)
+                except (TypeError, ValueError):
+                    pass
+
     return {
         "raw_response": payload,
         "response_text": response_text,
         "selected_model": selected_model,
         "routing_latency_ms": routing_latency_ms,
+        "completion_tokens": completion_tokens,
     }
 
 
@@ -758,6 +770,7 @@ def evaluate_one(
                 "selected_model": parsed["selected_model"],
                 "response_text": parsed["response_text"],
                 "routing_latency_ms": parsed["routing_latency_ms"],
+                "completion_tokens": parsed["completion_tokens"],
                 "http_elapsed_ms": total_http_elapsed_ms,
                 "task_score": task_score,
                 "is_supported": is_supported,
@@ -774,6 +787,7 @@ def evaluate_one(
                 "selected_model": None,
                 "response_text": "",
                 "routing_latency_ms": None,
+                "completion_tokens": None,
                 "http_elapsed_ms": (time.perf_counter() - started) * 1000.0,
                 "task_score": None,
                 "is_supported": False,
@@ -796,6 +810,11 @@ def summarize_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     routing_latencies = [float(row["routing_latency_ms"]) for row in ok_rows if isinstance(row.get("routing_latency_ms"), (int, float))]
     http_latencies = [float(row["http_elapsed_ms"]) for row in ok_rows if isinstance(row.get("http_elapsed_ms"), (int, float))]
+    completion_tokens_list = [
+        int(row["completion_tokens"])
+        for row in ok_rows
+        if isinstance(row.get("completion_tokens"), (int, float))
+    ]
 
     # All summary metrics are based on HTTP 200 rows only.
     dataset_counter = Counter(row.get("dataset_name") for row in ok_rows if row.get("dataset_name"))
@@ -808,6 +827,7 @@ def summarize_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "scored_count": len(scored_rows),
         "unsupported_count": len(unsupported_rows),
         "accuracy": avg_score,
+        "avg_completion_tokens": (sum(completion_tokens_list) / len(completion_tokens_list)) if completion_tokens_list else None,
         "avg_routing_latency_ms": (sum(routing_latencies) / len(routing_latencies)) if routing_latencies else None,
         "p50_routing_latency_ms": percentile(routing_latencies, 50),
         "p95_routing_latency_ms": percentile(routing_latencies, 95),
