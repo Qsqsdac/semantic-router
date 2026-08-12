@@ -128,21 +128,50 @@ def _load_dataset_with_datasets(
     return [dict(item) for item in ds]
 
 
+def _locate_local_hf_hub_parquet(dataset_name: str) -> List[Path]:
+    """Locate dataset parquet files already cached in the local HF Hub cache.
+
+    Fully offline-safe. Avoids the `datasets`/`fsspec` version incompatibility
+    (LocalFileSystem mis-detected as remote) as well as network/proxy issues
+    with HF Hub or its mirrors.
+    """
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+    except Exception:
+        return []
+    repo_cache_dir = Path(HF_HUB_CACHE) / ("datasets--" + dataset_name.replace("/", "--"))
+    if not repo_cache_dir.exists():
+        return []
+    for snapshot in sorted(repo_cache_dir.glob("snapshots/*")):
+        parquet_files = sorted(snapshot.rglob("*.parquet"))
+        if parquet_files:
+            return parquet_files
+    return []
+
+
 def _load_dataset_with_hf_hub_parquet(
     dataset_name: str, split: str, max_samples: int
 ) -> List[Dict[str, Any]]:
     """Fallback loader when `datasets` import fails due to version mismatch.
 
     Strategy:
-    1) Download dataset snapshot from HF Hub.
-    2) Read parquet files with pandas.
-    3) Select files that match split name when possible.
+    1) Use parquet files from the local HF Hub cache when available (offline).
+    2) Otherwise download the dataset snapshot from HF Hub.
+    3) Read parquet files with pandas.
+    4) Select files that match split name when possible.
     """
-    from huggingface_hub import snapshot_download
     import pandas as pd
 
-    local_dir = snapshot_download(repo_id=dataset_name, repo_type="dataset")
-    parquet_files = sorted(Path(local_dir).rglob("*.parquet"))
+    local_parquet_files = _locate_local_hf_hub_parquet(dataset_name)
+    if local_parquet_files:
+        print(f"[info] loading {dataset_name} from local HF Hub cache")
+        parquet_files = local_parquet_files
+    else:
+        from huggingface_hub import snapshot_download
+
+        local_dir = snapshot_download(repo_id=dataset_name, repo_type="dataset")
+        parquet_files = sorted(Path(local_dir).rglob("*.parquet"))
+
     if not parquet_files:
         raise RuntimeError(f"No parquet files found in dataset snapshot: {dataset_name}")
 
@@ -161,6 +190,14 @@ def _load_dataset_with_hf_hub_parquet(
 
 
 def load_hf_dataset(dataset_name: str, split: str, max_samples: int) -> List[Dict[str, Any]]:
+    # Prefer the offline local HF Hub cache first. This sidesteps two known
+    # breakages in this environment:
+    #   1) datasets 2.12.0 + fsspec>=2024 mis-detects LocalFileSystem as a
+    #      remote filesystem and raises NotImplementedError;
+    #   2) HF_ENDPOINT=https://hf-mirror.com makes snapshot_download fail with
+    #      "Distant resource does not seem to be on huggingface.co".
+    if _locate_local_hf_hub_parquet(dataset_name):
+        return _load_dataset_with_hf_hub_parquet(dataset_name, split, max_samples)
     try:
         return _load_dataset_with_datasets(dataset_name, split, max_samples)
     except Exception as exc:
