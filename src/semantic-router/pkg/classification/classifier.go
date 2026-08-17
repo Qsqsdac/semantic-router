@@ -903,23 +903,23 @@ func NewClassifier(cfg *config.RouterConfig, categoryMapping *CategoryMapping, p
 				threshold = defaultFastTextThreshold
 			}
 
-			timeoutSec := cfg.CategoryModel.IntentFastTextTimeoutSec
-			if timeoutSec <= 0 {
-				timeoutSec = int(defaultFastTextTimeout.Seconds())
+			timeout := time.Duration(0)
+			if cfg.CategoryModel.IntentFastTextTimeoutSec > 0 {
+				timeout = time.Duration(cfg.CategoryModel.IntentFastTextTimeoutSec) * time.Second
 			}
 
 			ftClassifier, err := NewFastTextIntentClassifier(
 				cfg.CategoryModel.IntentFastTextBinaryPath,
 				modelPath,
 				float64(threshold),
-				time.Duration(timeoutSec)*time.Second,
+				timeout,
 			)
 			if err != nil {
 				return nil, fmt.Errorf("failed to initialize intent fastText classifier: %w", err)
 			}
 
 			options = append(options, withIntentFastTextClassifier(ftClassifier))
-			logging.Infof("Intent fastText fast-path enabled (mode=%s, threshold=%.3f, timeout=%ds)", cfg.CategoryModel.EffectiveIntentMatchMode(), threshold, timeoutSec)
+			logging.Infof("Intent fastText fast-path enabled (mode=%s, threshold=%.3f)", cfg.CategoryModel.EffectiveIntentMatchMode(), threshold)
 		}
 	}
 
@@ -934,23 +934,23 @@ func NewClassifier(cfg *config.RouterConfig, categoryMapping *CategoryMapping, p
 			threshold = defaultFastTextThreshold
 		}
 
-		timeoutSec := cfg.CategoryModel.IntentFastTextTimeoutSec
-		if timeoutSec <= 0 {
-			timeoutSec = int(defaultFastTextTimeout.Seconds())
+		timeout := time.Duration(0)
+		if cfg.CategoryModel.IntentFastTextTimeoutSec > 0 {
+			timeout = time.Duration(cfg.CategoryModel.IntentFastTextTimeoutSec) * time.Second
 		}
 
 		ftClassifier, err := NewFastTextIntentClassifier(
 			cfg.CategoryModel.IntentFastTextBinaryPath,
 			modelPath,
 			float64(threshold),
-			time.Duration(timeoutSec)*time.Second,
+			timeout,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize intent fastText classifier: %w", err)
 		}
 
 		options = append(options, withIntentFastTextClassifier(ftClassifier))
-		logging.Infof("Intent fastText fast-path enabled (mode=%s, threshold=%.3f, timeout=%ds)", cfg.CategoryModel.EffectiveIntentMatchMode(), threshold, timeoutSec)
+		logging.Infof("Intent fastText fast-path enabled (mode=%s, threshold=%.3f)", cfg.CategoryModel.EffectiveIntentMatchMode(), threshold)
 	}
 
 	// Add MCP classifier if configured

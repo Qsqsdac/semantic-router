@@ -1,4 +1,4 @@
-//! C FFI interface for BM25 and N-gram classifiers.
+//! C FFI interface for BM25, N-gram, Aho-Corasick, and fastText classifiers.
 //!
 //! Follows the same convention as candle-binding:
 //! - `#[no_mangle] pub extern "C" fn` for all exports
@@ -9,10 +9,11 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::aho_classifier::AhoClassifier;
 use crate::bm25_classifier::Bm25Classifier;
+use crate::fasttext_classifier::FastTextClassifier;
 use crate::ngram_classifier::NgramClassifier;
 
 // ---------------------------------------------------------------------------
@@ -26,6 +27,9 @@ static NGRAM_CLASSIFIERS: OnceLock<Mutex<std::collections::HashMap<u64, NgramCla
     OnceLock::new();
 static AHO_CLASSIFIERS: OnceLock<Mutex<std::collections::HashMap<u64, AhoClassifier>>> =
     OnceLock::new();
+type FastTextHandle = Arc<Mutex<FastTextClassifier>>;
+static FASTTEXT_CLASSIFIERS: OnceLock<Mutex<std::collections::HashMap<u64, FastTextHandle>>> =
+    OnceLock::new();
 
 fn bm25_map() -> &'static Mutex<std::collections::HashMap<u64, Bm25Classifier>> {
     BM25_CLASSIFIERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
@@ -37,6 +41,10 @@ fn ngram_map() -> &'static Mutex<std::collections::HashMap<u64, NgramClassifier>
 
 fn aho_map() -> &'static Mutex<std::collections::HashMap<u64, AhoClassifier>> {
     AHO_CLASSIFIERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn fasttext_map() -> &'static Mutex<std::collections::HashMap<u64, FastTextHandle>> {
+    FASTTEXT_CLASSIFIERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -64,6 +72,39 @@ pub struct ClassifyResult {
     pub match_count: i32,
     /// Total keywords in the matched rule.
     pub total_keywords: i32,
+}
+
+/// Result of a fastText prediction.
+#[repr(C)]
+pub struct FastTextPredictionResult {
+    /// Whether a label met the requested threshold.
+    pub matched: bool,
+    /// Label name (caller must free with `fasttext_prediction_result_free`).
+    pub label: *mut c_char,
+    /// Prediction probability.
+    pub probability: f32,
+    /// Error text when prediction failed.
+    pub error: *mut c_char,
+}
+
+impl FastTextPredictionResult {
+    fn empty() -> Self {
+        FastTextPredictionResult {
+            matched: false,
+            label: ptr::null_mut(),
+            probability: 0.0,
+            error: ptr::null_mut(),
+        }
+    }
+
+    fn error(message: String) -> Self {
+        FastTextPredictionResult {
+            matched: false,
+            label: ptr::null_mut(),
+            probability: 0.0,
+            error: to_c_string(&message),
+        }
+    }
 }
 
 impl ClassifyResult {
@@ -499,6 +540,83 @@ pub extern "C" fn aho_classifier_classify(handle: u64, text: *const c_char) -> C
 #[no_mangle]
 pub extern "C" fn aho_classifier_free(handle: u64) {
     aho_map().lock().unwrap().remove(&handle);
+}
+
+// ===========================================================================
+// fastText Classifier FFI
+// ===========================================================================
+
+/// Load a fastText model and return a classifier handle (>0), or 0 on error.
+#[no_mangle]
+pub extern "C" fn fasttext_classifier_new(model_path: *const c_char) -> u64 {
+    let model_path = match unsafe { from_c_str(model_path) } {
+        Some(s) => s,
+        None => return 0,
+    };
+
+    let classifier = match FastTextClassifier::load(model_path) {
+        Ok(classifier) => classifier,
+        Err(_) => return 0,
+    };
+
+    let id = next_id();
+    fasttext_map()
+        .lock()
+        .unwrap()
+        .insert(id, Arc::new(Mutex::new(classifier)));
+    id
+}
+
+/// Predict the top fastText label for the provided text.
+#[no_mangle]
+pub extern "C" fn fasttext_classifier_predict(
+    handle: u64,
+    text: *const c_char,
+    threshold: f32,
+) -> FastTextPredictionResult {
+    let text = match unsafe { from_c_str(text) } {
+        Some(s) => s,
+        None => return FastTextPredictionResult::error("invalid fastText input text".to_string()),
+    };
+
+    let classifier = match fasttext_map().lock().unwrap().get(&handle).cloned() {
+        Some(c) => c,
+        None => {
+            return FastTextPredictionResult::error(
+                "invalid fastText classifier handle".to_string(),
+            )
+        }
+    };
+
+    match classifier.lock().unwrap().predict(text, 1, threshold) {
+        Ok(Some(prediction)) => FastTextPredictionResult {
+            matched: true,
+            label: to_c_string(&prediction.label),
+            probability: prediction.probability,
+            error: ptr::null_mut(),
+        },
+        Ok(None) => FastTextPredictionResult::empty(),
+        Err(err) => FastTextPredictionResult::error(err),
+    }
+}
+
+/// Destroy a fastText classifier and free its resources.
+#[no_mangle]
+pub extern "C" fn fasttext_classifier_free(handle: u64) {
+    fasttext_map().lock().unwrap().remove(&handle);
+}
+
+/// Free a FastTextPredictionResult returned by `fasttext_classifier_predict`.
+#[no_mangle]
+pub extern "C" fn fasttext_prediction_result_free(result: FastTextPredictionResult) {
+    unsafe {
+        if !result.label.is_null() {
+            let _ = CString::from_raw(result.label);
+        }
+        if !result.error.is_null() {
+            let _ = CString::from_raw(result.error);
+        }
+    }
 }
 
 // ===========================================================================

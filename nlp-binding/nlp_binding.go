@@ -3,8 +3,8 @@
 // +build cgo
 // +build amd64 arm64
 
-// Package nlp_binding provides Go bindings for BM25 and N-gram keyword
-// classification backed by Rust implementations via C FFI.
+// Package nlp_binding provides Go bindings for BM25, N-gram, Aho-Corasick,
+// and fastText classification backed by Rust implementations via C FFI.
 //
 // It follows the same convention as candle-binding:
 //   - Rust builds a static/dynamic library via cargo build --release
@@ -14,6 +14,7 @@
 package nlp_binding
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
 )
@@ -33,6 +34,13 @@ typedef struct {
     int match_count;
     int total_keywords;
 } ClassifyResult;
+
+typedef struct {
+    bool matched;
+    char* label;
+    float probability;
+    char* error;
+} FastTextPredictionResult;
 
 // BM25 classifier FFI
 extern uint64_t bm25_classifier_new();
@@ -74,6 +82,16 @@ extern bool aho_classifier_add_rule(
 );
 extern ClassifyResult aho_classifier_classify(uint64_t handle, const char* text);
 extern void aho_classifier_free(uint64_t handle);
+
+// fastText classifier FFI
+extern uint64_t fasttext_classifier_new(const char* model_path);
+extern FastTextPredictionResult fasttext_classifier_predict(
+	uint64_t handle,
+	const char* text,
+	float threshold
+);
+extern void fasttext_classifier_free(uint64_t handle);
+extern void fasttext_prediction_result_free(FastTextPredictionResult result);
 
 // Memory management
 extern void free_classify_result(ClassifyResult result);
@@ -297,6 +315,65 @@ func (c *AhoClassifier) Classify(text string) MatchResult {
 // Free releases the Rust-side resources for this classifier.
 func (c *AhoClassifier) Free() {
 	C.aho_classifier_free(c.handle)
+}
+
+// ---------------------------------------------------------------------------
+// fastText Classifier
+// ---------------------------------------------------------------------------
+
+// FastTextClassifier wraps an in-process Rust-backed fastText model.
+type FastTextClassifier struct {
+	handle C.uint64_t
+}
+
+// FastTextPrediction represents the top fastText label and probability.
+type FastTextPrediction struct {
+	Matched     bool
+	Label       string
+	Probability float32
+}
+
+// NewFastTextClassifier loads a fastText .bin/.ftz model into the process.
+func NewFastTextClassifier(modelPath string) (*FastTextClassifier, error) {
+	cModelPath := C.CString(modelPath)
+	defer C.free(unsafe.Pointer(cModelPath))
+
+	handle := C.fasttext_classifier_new(cModelPath)
+	if handle == 0 {
+		return nil, fmt.Errorf("failed to load fastText model %q", modelPath)
+	}
+	return &FastTextClassifier{handle: handle}, nil
+}
+
+// Predict returns the top label with probability >= threshold.
+func (c *FastTextClassifier) Predict(text string, threshold float32) (FastTextPrediction, error) {
+	cText := C.CString(text)
+	defer C.free(unsafe.Pointer(cText))
+
+	result := C.fasttext_classifier_predict(c.handle, cText, C.float(threshold))
+	defer C.fasttext_prediction_result_free(result)
+
+	if result.error != nil {
+		return FastTextPrediction{}, errors.New(C.GoString(result.error))
+	}
+
+	prediction := FastTextPrediction{
+		Matched:     bool(result.matched),
+		Probability: float32(result.probability),
+	}
+	if result.label != nil {
+		prediction.Label = C.GoString(result.label)
+	}
+	return prediction, nil
+}
+
+// Free releases the Rust-side fastText model.
+func (c *FastTextClassifier) Free() {
+	if c == nil || c.handle == 0 {
+		return
+	}
+	C.fasttext_classifier_free(c.handle)
+	c.handle = 0
 }
 
 // ---------------------------------------------------------------------------

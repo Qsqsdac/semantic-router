@@ -1,7 +1,8 @@
 //go:build windows || !cgo
 
-// Package nlp_binding provides Go bindings for BM25 and N-gram keyword
-// classification. This is the mock implementation for platforms without CGo.
+// Package nlp_binding provides Go bindings for BM25, N-gram, Aho-Corasick,
+// and fastText classification. This is the mock implementation for platforms
+// without CGo.
 package nlp_binding
 
 import "fmt"
@@ -90,3 +91,30 @@ func (c *AhoClassifier) Classify(text string) MatchResult {
 
 // Free releases resources (mock - no-op).
 func (c *AhoClassifier) Free() {}
+
+// ---------------------------------------------------------------------------
+// fastText Classifier (mock)
+// ---------------------------------------------------------------------------
+
+// FastTextClassifier wraps an in-process Rust-backed fastText model.
+type FastTextClassifier struct{}
+
+// FastTextPrediction represents the top fastText label and probability.
+type FastTextPrediction struct {
+	Matched     bool
+	Label       string
+	Probability float32
+}
+
+// NewFastTextClassifier creates a fastText classifier instance (mock).
+func NewFastTextClassifier(modelPath string) (*FastTextClassifier, error) {
+	return nil, fmt.Errorf("nlp-binding: fastText classifier not available (built without CGo)")
+}
+
+// Predict runs prediction (mock - always returns no match).
+func (c *FastTextClassifier) Predict(text string, threshold float32) (FastTextPrediction, error) {
+	return FastTextPrediction{}, fmt.Errorf("nlp-binding: fastText classifier not available (built without CGo)")
+}
+
+// Free releases resources (mock - no-op).
+func (c *FastTextClassifier) Free() {}
