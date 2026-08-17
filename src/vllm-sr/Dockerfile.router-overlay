@@ -1,0 +1,4 @@
+FROM ghcr.io/vllm-project/semantic-router/vllm-sr:latest
+COPY --from=vllm-sr-go-builder:latest /build/router /usr/local/bin/router
+COPY src/vllm-sr/start-router-overlay.sh /app/start-router.sh
+RUN chmod +x /app/start-router.sh

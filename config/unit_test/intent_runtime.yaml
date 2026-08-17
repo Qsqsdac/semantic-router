@@ -1,0 +1,213 @@
+version: v0.3
+
+listeners:
+  - name: "http-8899"
+    address: "0.0.0.0"
+    port: 8899
+    timeout: "300s"
+
+providers:
+  defaults:
+    default_model: "MoM"
+  models:
+    - name: "MoM"
+      provider_model_id: "qwen3.5:0.8b"
+      backend_refs:
+        - name: "primary"
+          endpoint: "host.docker.internal:18081"
+          protocol: "http"
+          type: "openai"
+          base_url: "http://host.docker.internal:18081/v1"
+          provider: "openai"
+          auth_header: "Authorization"
+          auth_prefix: "Bearer"
+          api_key: "sk-123456"
+          extra_headers:
+            Authorization: "Bearer sk-123456"
+          weight: 100
+    - name: "MoM-large"
+      provider_model_id: "qwen3.5:122b"
+      backend_refs:
+        - name: "primary"
+          endpoint: "host.docker.internal:18081"
+          protocol: "http"
+          type: "openai"
+          base_url: "http://host.docker.internal:18081/v1"
+          provider: "openai"
+          auth_header: "Authorization"
+          auth_prefix: "Bearer"
+          api_key: "sk-123456"
+          extra_headers:
+            Authorization: "Bearer sk-123456"
+          weight: 100
+
+routing:
+  modelCards:
+    - name: "MoM"
+      description: "Fast default text model"
+      capabilities: ["chat", "reasoning"]
+    - name: "MoM-large"
+      description: "Higher quality model for complex domain intents"
+      capabilities: ["chat", "reasoning", "long-context"]
+
+  signals:
+    domains:
+      - name: "biology"
+        description: "Biology and life sciences queries."
+        mmlu_categories: [biology]
+      - name: "business"
+        description: "Business and management queries."
+        mmlu_categories: [business]
+      - name: "chemistry"
+        description: "Chemistry queries."
+        mmlu_categories: [chemistry]
+      - name: "computer science"
+        description: "Computer science and software engineering queries."
+        mmlu_categories: ["computer science"]
+      - name: "economics"
+        description: "Economics and finance theory queries."
+        mmlu_categories: [economics]
+      - name: "engineering"
+        description: "Engineering and applied technical queries."
+        mmlu_categories: [engineering]
+      - name: "health"
+        description: "Health and medical queries."
+        mmlu_categories: [health]
+      - name: "history"
+        description: "History queries."
+        mmlu_categories: [history]
+      - name: "law"
+        description: "Legal and regulatory queries."
+        mmlu_categories: [law]
+      - name: "math"
+        description: "Math and quantitative reasoning queries."
+        mmlu_categories: [math]
+      - name: "philosophy"
+        description: "Philosophy and ethics queries."
+        mmlu_categories: [philosophy]
+      - name: "physics"
+        description: "Physics queries."
+        mmlu_categories: [physics]
+      - name: "psychology"
+        description: "Psychology and behavior queries."
+        mmlu_categories: [psychology]
+      - name: "other"
+        description: "General fallback traffic."
+        mmlu_categories: [other]
+
+  decisions:
+    - name: "domain_large_model_route"
+      description: "Complex intent categories route to large model."
+      priority: 200
+      rules:
+        operator: OR
+        conditions:
+          - type: domain
+            name: "biology"
+          - type: domain
+            name: "chemistry"
+          - type: domain
+            name: "computer science"
+          - type: domain
+            name: "engineering"
+          - type: domain
+            name: "health"
+          - type: domain
+            name: "law"
+          - type: domain
+            name: "math"
+          - type: domain
+            name: "physics"
+      modelRefs:
+        - model: MoM-large
+          use_reasoning: true
+      algorithm:
+        type: static
+      plugins:
+        - type: semantic-cache
+          configuration:
+            enabled: true
+            similarity_threshold: 0.85
+            ttl_seconds: 7200
+
+    - name: "domain_small_model_route"
+      description: "Remaining intent categories route to small model."
+      priority: 100
+      rules:
+        operator: OR
+        conditions:
+          - type: domain
+            name: "business"
+          - type: domain
+            name: "economics"
+          - type: domain
+            name: "history"
+          - type: domain
+            name: "philosophy"
+          - type: domain
+            name: "psychology"
+          - type: domain
+            name: "other"
+      modelRefs:
+        - model: MoM
+          use_reasoning: false
+      algorithm:
+        type: static
+      plugins:
+        - type: semantic-cache
+          configuration:
+            enabled: true
+            similarity_threshold: 0.85
+            ttl_seconds: 7200
+
+global:
+  router:
+    model_selection:
+      enabled: false
+  model_catalog:
+    embeddings:
+      semantic:
+        qwen3_model_path: ""
+        gemma_model_path: ""
+        mmbert_model_path: ""
+        bert_model_path: ""
+        use_cpu: true
+        embedding_config:
+          preload_embeddings: false
+    modules:
+      prompt_guard:
+        enabled: false
+        model_id: ""
+        jailbreak_mapping_path: ""
+      classifier:
+        domain:
+          model_ref: "domain_classifier"
+          threshold: 0.5
+          use_cpu: true
+          use_mmbert_32k: true
+          category_mapping_path: models/mmbert32k-intent-classifier-merged/category_mapping.json
+          intent_match_mode: bert
+        pii:
+          model_ref: ""
+          model_id: ""
+          pii_mapping_path: ""
+      feedback_detector:
+        enabled: false
+        model_id: ""
+      hallucination_mitigation:
+        enabled: false
+        fact_check:
+          model_id: ""
+        detector:
+          model_id: ""
+        explainer:
+          model_id: ""
+  stores:
+    semantic_cache:
+      backend_type: memory
+      enabled: true
+      similarity_threshold: 0.85
+      max_entries: 50000
+      ttl_seconds: 7200
+      eviction_policy: lru
+      use_hnsw: true

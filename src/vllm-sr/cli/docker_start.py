@@ -262,9 +262,14 @@ def _configure_openclaw_support(
     )
     openclaw_data_dir = os.path.abspath(openclaw_data_dir)
     os.makedirs(openclaw_data_dir, exist_ok=True)
-    cmd.extend(["-v", f"{openclaw_data_dir}:{openclaw_data_dir}:z"])
-    env_vars["OPENCLAW_DATA_DIR"] = openclaw_data_dir
-    log.info(f"Mounting OpenClaw data directory: {openclaw_data_dir}")
+    container_openclaw_data_dir = (
+        "/app/.vllm-sr/openclaw-data" if os.name == "nt" else openclaw_data_dir
+    )
+    cmd.extend(["-v", f"{openclaw_data_dir}:{container_openclaw_data_dir}:z"])
+    env_vars["OPENCLAW_DATA_DIR"] = container_openclaw_data_dir
+    log.info(
+        f"Mounting OpenClaw data directory: {openclaw_data_dir} -> {container_openclaw_data_dir}"
+    )
 
     env_vars.setdefault(
         "OPENCLAW_BASE_IMAGE",
