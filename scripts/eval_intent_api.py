@@ -8,7 +8,7 @@
 3) 会保存逐条样本输出（含序号、预测结果、原始响应）和汇总指标，方便后续模型版本对比。
 
 示例：
-python scripts/eval_classification_api_intent.py \
+python scripts/eval_intent_api.py \
   --router-url http://localhost:8080 \
   --max-samples 2000 \
   --output-dir reports/classification-intent

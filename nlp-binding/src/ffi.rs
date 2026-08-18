@@ -588,7 +588,7 @@ pub extern "C" fn fasttext_classifier_predict(
         }
     };
 
-    match classifier.lock().unwrap().predict(text, 1, threshold) {
+    let result = match classifier.lock().unwrap().predict(text, 1, threshold) {
         Ok(Some(prediction)) => FastTextPredictionResult {
             matched: true,
             label: to_c_string(&prediction.label),
@@ -597,7 +597,8 @@ pub extern "C" fn fasttext_classifier_predict(
         },
         Ok(None) => FastTextPredictionResult::empty(),
         Err(err) => FastTextPredictionResult::error(err),
-    }
+    };
+    result
 }
 
 /// Destroy a fastText classifier and free its resources.
