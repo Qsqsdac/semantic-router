@@ -97,7 +97,13 @@ func (c *Classifier) translateMMLUToGeneric(mmluCategory string) string {
 	if c.MMLUToGeneric == nil {
 		return mmluCategory
 	}
-	if generic, ok := c.MMLUToGeneric[strings.ToLower(mmluCategory)]; ok {
+	key := strings.ToLower(mmluCategory)
+	if generic, ok := c.MMLUToGeneric[key]; ok {
+		return generic
+	}
+	// fastText labels use underscores (e.g. "computer_science") while the
+	// mapping keys are the space-separated MMLU names ("computer science").
+	if generic, ok := c.MMLUToGeneric[strings.ReplaceAll(key, "_", " ")]; ok {
 		return generic
 	}
 	return mmluCategory

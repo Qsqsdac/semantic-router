@@ -167,11 +167,10 @@ global:
     modules:
       classifier:
         domain:
-          intent_match_mode: fasttext_only
-          intent_fasttext_threshold: 0.8
-          intent_fasttext_timeout_seconds: 2
+          intent_match_mode: fasttext_fallback_bert
+          intent_fasttext_threshold: 0.6
           intent_fasttext_model_path: /app/intent-assets/models/intent_fasttext.bin
-          intent_fasttext_binary_path: /app/intent-assets/bin/fasttext.real
+
   stores:
     semantic_cache:
       enabled: false

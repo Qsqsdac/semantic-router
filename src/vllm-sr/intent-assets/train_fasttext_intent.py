@@ -11,6 +11,8 @@ from typing import Any, Dict, List
 
 SUPPORTED_DATASET = "TIGER-Lab/MMLU-Pro"
 SUPPORTED_SPLIT = "test"
+SUPPORTED_VALID_SPLIT = "validation"
+HOLDOUT_SIZE = 1000
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
@@ -25,9 +27,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train fastText intent model from MMLU-Pro")
     parser.add_argument("--dataset", default=SUPPORTED_DATASET)
     parser.add_argument("--split", default=SUPPORTED_SPLIT)
-    parser.add_argument("--max-samples", type=int, default=0, help="0 means all")
-    parser.add_argument("--train-ratio", type=float, default=0.9)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--max-samples", type=int, default=0, help="train sample limit after holdout; 0 means all remaining")
+    parser.add_argument("--holdout", type=int, default=HOLDOUT_SIZE, help="first N shuffled records reserved for evaluation")
+    parser.add_argument("--valid-split", default=SUPPORTED_VALID_SPLIT, help="split used as fastText validation set")
     parser.add_argument("--fasttext-bin", default="bin/fasttext.real")
     parser.add_argument("--work-dir", default=".build/fasttext-intent")
     parser.add_argument("--output-model", default="models/intent_fasttext.bin")
@@ -66,43 +68,68 @@ def normalize_label(value: Any) -> str:
     return alias.get(text, text.replace(" ", "_"))
 
 
-def load_with_datasets(dataset_name: str, split: str, max_samples: int) -> List[Dict[str, Any]]:
-    from datasets import load_dataset
+def _locate_local_hf_hub_parquet(dataset_name: str) -> List[Path]:
+    """Locate dataset parquet files already cached in the local HF Hub cache.
 
-    ds = load_dataset(dataset_name, split=split)
-    ds = ds.shuffle(seed=42)
-    if max_samples > 0:
-        ds = ds.select(range(len(ds)-max_samples, len(ds)))
-    return [dict(item) for item in ds]
+    Offline-safe and deterministic: the local cache is the canonical source used
+    by both this script and scripts/eval_intent_api.py, so both share the exact
+    same shuffled record order (fixed seed below).
+    """
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+    except Exception:
+        return []
+    repo_cache_dir = Path(HF_HUB_CACHE) / ("datasets--" + dataset_name.replace("/", "--"))
+    if not repo_cache_dir.exists():
+        return []
+    for snapshot in sorted(repo_cache_dir.glob("snapshots/*")):
+        parquet_files = sorted(snapshot.rglob("*.parquet"))
+        if parquet_files:
+            return parquet_files
+    return []
 
 
-def load_with_hf_hub_parquet(dataset_name: str, split: str, max_samples: int) -> List[Dict[str, Any]]:
-    from huggingface_hub import snapshot_download
+def _read_split_parquet(parquet_files: List[Path], split: str) -> List[Dict[str, Any]]:
     import pandas as pd
-
-    local_dir = snapshot_download(repo_id=dataset_name, repo_type="dataset")
-    parquet_files = sorted(Path(local_dir).rglob("*.parquet"))
-    if not parquet_files:
-        raise RuntimeError(f"No parquet files found in dataset snapshot: {dataset_name}")
 
     split_matches = [p for p in parquet_files if split.lower() in p.name.lower()]
     target_files = split_matches if split_matches else parquet_files
-
     frames = [pd.read_parquet(p) for p in target_files]
     df = pd.concat(frames, ignore_index=True)
-    records = df.to_dict(orient="records")
-    random.Random(42).shuffle(records)
-    if max_samples > 0:
-        records = records[len(records)-max_samples:]
-    return records
+    return df.to_dict(orient="records")
 
 
-def load_samples(dataset_name: str, split: str, max_samples: int) -> List[Dict[str, Any]]:
+def load_samples(dataset_name: str, split: str) -> List[Dict[str, Any]]:
+    """Load a full split, shuffled with a fixed seed.
+
+    The fixed shuffle (random.Random(42)) MUST match scripts/eval_intent_api.py
+    so that the first `holdout` records are identical in both scripts: training
+    uses the tail, evaluation uses the head.
+    """
+    local_parquet_files = _locate_local_hf_hub_parquet(dataset_name)
+    if local_parquet_files:
+        records = _read_split_parquet(local_parquet_files, split)
+        random.Random(42).shuffle(records)
+        return records
+
     try:
-        return load_with_datasets(dataset_name, split, max_samples)
+        from datasets import load_dataset
+
+        ds = load_dataset(dataset_name, split=split)
+        records = [dict(item) for item in ds]
+        random.Random(42).shuffle(records)
+        return records
     except Exception as exc:
         print(f"[warn] datasets loader failed, fallback to huggingface_hub+parquet: {exc}")
-        return load_with_hf_hub_parquet(dataset_name, split, max_samples)
+        from huggingface_hub import snapshot_download
+
+        local_dir = snapshot_download(repo_id=dataset_name, repo_type="dataset")
+        parquet_files = sorted(Path(local_dir).rglob("*.parquet"))
+        if not parquet_files:
+            raise RuntimeError(f"No parquet files found in dataset snapshot: {dataset_name}")
+        records = _read_split_parquet(parquet_files, split)
+        random.Random(42).shuffle(records)
+        return records
 
 
 def to_fasttext_line(sample: Dict[str, Any]) -> str | None:
@@ -140,18 +167,25 @@ def main() -> None:
     if not fasttext_bin.exists():
         raise SystemExit(f"fasttext binary not found: {fasttext_bin}")
 
-    samples = load_samples(args.dataset, args.split, args.max_samples)
-    lines = [x for x in (to_fasttext_line(s) for s in samples) if x]
-    if len(lines) < 100:
-        raise SystemExit(f"not enough valid samples: {len(lines)}")
+    test_records = load_samples(args.dataset, args.split)
+    if args.holdout >= len(test_records):
+        raise SystemExit(
+            f"holdout ({args.holdout}) must be smaller than dataset size ({len(test_records)})"
+        )
+    train_records = test_records[args.holdout:]
+    if args.max_samples > 0:
+        train_records = train_records[: args.max_samples]
 
-    rnd = random.Random(args.seed)
-    rnd.shuffle(lines)
+    valid_records = load_samples(args.dataset, args.valid_split)
 
-    train_count = int(len(lines) * args.train_ratio)
-    train_count = max(1, min(train_count, len(lines) - 1))
-    train_lines = lines[:train_count]
-    valid_lines = lines[train_count:]
+    train_lines = [x for x in (to_fasttext_line(s) for s in train_records) if x]
+    valid_lines = [x for x in (to_fasttext_line(s) for s in valid_records) if x]
+    if len(train_lines) < 100:
+        raise SystemExit(f"not enough valid train samples: {len(train_lines)}")
+    if not valid_lines:
+        raise SystemExit(
+            f"no valid samples in split {args.valid_split!r} (got {len(valid_records)} records)"
+        )
 
     train_path = work_dir / "train.txt"
     valid_path = work_dir / "valid.txt"

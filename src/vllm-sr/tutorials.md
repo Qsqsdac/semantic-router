@@ -16,7 +16,7 @@ VLLM_SR_STACK_NAME=lane-b VLLM_SR_PORT_OFFSET=200 vllm-sr stop
 curl -X POST http://localhost:8280/api/v1/classify/intent   -H "Content-Type: application/json"   -d '{"text": "what is cad?"}'
 
 ## 脚本
-python ../../scripts/eval_intent_api.py --router-url http://localhost:8280 --max-samples 1000
+python ../../scripts/eval_intent_api.py --router-url http://localhost:8280
 
 # jailbreak 测试
 

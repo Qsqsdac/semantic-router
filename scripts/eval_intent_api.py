@@ -69,8 +69,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-samples",
         type=int,
-        default=0,
-        help="Max sample count, 0 means all",
+        default=1000,
+        help=(
+            "Max sample count. Defaults to 1000: the evaluation holdout shared "
+            "with train_fasttext_intent.py (first N shuffled records)."
+        ),
     )
     parser.add_argument(
         "--timeout",
@@ -122,10 +125,13 @@ def _load_dataset_with_datasets(
     from datasets import load_dataset
 
     ds = load_dataset(dataset_name, split=split)
-    ds = ds.shuffle(seed=42)
+    records = [dict(item) for item in ds]
+    # Fixed shuffle must match train_fasttext_intent.py so the first N records
+    # are the shared evaluation holdout.
+    random.Random(42).shuffle(records)
     if max_samples > 0:
-        ds = ds.select(range(min(max_samples, len(ds))))
-    return [dict(item) for item in ds]
+        records = records[:max_samples]
+    return records
 
 
 def _locate_local_hf_hub_parquet(dataset_name: str) -> List[Path]:
