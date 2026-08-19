@@ -381,8 +381,6 @@ impl MmBertSequenceClassifier {
                             println!("INFO: ROCm EP failed to register: {}", e);
                         }
                     }
-
-                    println!("WARNING: All GPU execution providers failed, falling back to CPU");
                 }
 
                 #[cfg(not(feature = "rocm"))]
@@ -391,6 +389,63 @@ impl MmBertSequenceClassifier {
                         println!(
                             "WARNING: ROCm requested but 'rocm' feature not enabled, using CPU"
                         );
+                    }
+                }
+
+                // Auto: fall through to CUDA when this build has the CUDA EP but no ROCm.
+                // Priority is ROCm/MIGraphX > CUDA > OpenVINO > CPU.
+                #[cfg(feature = "cuda")]
+                {
+                    if matches!(provider, ClassifierExecutionProvider::Auto) {
+                        use crate::core::gpu_memory;
+                        use ort::execution_providers::{
+                            ArenaExtendStrategy as CudaArenaStrategy, CUDAExecutionProvider,
+                        };
+                        let mem_limit = gpu_memory::get_gpu_mem_limit();
+                        match Session::builder()
+                            .map_err(|e: ort::Error| errors::ort_error(&e.to_string()))?
+                            .with_execution_providers([CUDAExecutionProvider::default()
+                                .with_memory_limit(mem_limit)
+                                .with_arena_extend_strategy(CudaArenaStrategy::SameAsRequested)
+                                .build()
+                                .error_on_failure()])
+                            .and_then(|b| b.commit_from_file(onnx_path.as_ref()))
+                        {
+                            Ok(session) => {
+                                println!(
+                                    "INFO: Using CUDA execution provider (NVIDIA GPU) — verified"
+                                );
+                                return Ok(session);
+                            }
+                            Err(e) => {
+                                println!("INFO: CUDA EP failed to register: {}", e);
+                            }
+                        }
+                    }
+                }
+
+                // Auto: fall through to OpenVINO when this build has the OpenVINO EP.
+                #[cfg(feature = "openvino")]
+                {
+                    if matches!(provider, ClassifierExecutionProvider::Auto) {
+                        use ort::execution_providers::OpenVINOExecutionProvider;
+                        match Session::builder()
+                            .map_err(|e: ort::Error| errors::ort_error(&e.to_string()))?
+                            .with_execution_providers([OpenVINOExecutionProvider::default()
+                                .build()
+                                .error_on_failure()])
+                            .and_then(|b| b.commit_from_file(onnx_path.as_ref()))
+                        {
+                            Ok(session) => {
+                                println!(
+                                    "INFO: Using OpenVINO execution provider (Intel) — verified"
+                                );
+                                return Ok(session);
+                            }
+                            Err(e) => {
+                                println!("INFO: OpenVINO EP failed to register: {}", e);
+                            }
+                        }
                     }
                 }
 

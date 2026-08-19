@@ -570,6 +570,14 @@ func ClassifyMmBert32KJailbreak(text string) (ClassResult, error) {
 	return classifyWithClassifier("jailbreak", text)
 }
 
+// ClassifyMmBert32KJailbreakWithEarlyExit classifies text for jailbreak detection.
+// ONNX Runtime does not implement the Candle early-exit head optimization, so this
+// is equivalent to a full forward pass (ClassifyMmBert32KJailbreak). The signature
+// matches candle_binding for drop-in compatibility.
+func ClassifyMmBert32KJailbreakWithEarlyExit(text string, _ []int, _ float32) (ClassResult, error) {
+	return classifyWithClassifier("jailbreak", text)
+}
+
 // ClassifyMmBert32KFeedback classifies text for feedback detection
 func ClassifyMmBert32KFeedback(text string) (ClassResult, error) {
 	return classifyWithClassifier("feedback", text)

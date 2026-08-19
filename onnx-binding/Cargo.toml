@@ -18,6 +18,8 @@ rocm = ["ort/rocm"]
 migraphx = ["ort/migraphx"]
 # CUDA support (enables NVIDIA GPU acceleration)
 cuda = ["ort/cuda"]
+# CUDA via dynamic loading (for Docker containers with CUDA ONNX Runtime)
+cuda-dynamic = ["cuda", "ort/load-dynamic"]
 # DirectML support (Windows GPU acceleration)
 directml = ["ort/directml"]
 # OpenVINO support (Intel acceleration) - requires building ORT with OpenVINO
@@ -67,3 +69,7 @@ path = "examples/test_classifier.rs"
 [[example]]
 name = "benchmark_mmbert_latency"
 path = "examples/benchmark_mmbert_latency.rs"
+
+[[example]]
+name = "cuda_smoke"
+path = "examples/cuda_smoke.rs"

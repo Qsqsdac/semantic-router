@@ -71,13 +71,22 @@ The mmBERT model supports two dimensions of flexibility:
 | 11    | 512       | ~67%    | ~2x     |
 | 6     | 256       | ~56%    | ~3.7x   |
 
+## Supported Backends
+
+| Backend | Device | Status |
+|---|---|---|
+| Candle | CPU | Supported |
+| ONNX Runtime | CPU | Supported |
+| ONNX Runtime | ROCm (AMD) | Supported |
+| ONNX Runtime | CUDA (NVIDIA) | Supported |
+
 ## Tested Configurations
 
 | Platform | Backend | glibc | Status |
 |----------|---------|-------|--------|
 | Linux (any) | CPU | 2.38+ | Recommended |
 | `rocm/pytorch:latest` | AMD MI300X | 2.39 | Working |
-| NVIDIA containers | CUDA | varies | Working |
+| NVIDIA CUDA containers | CUDA | varies | Working |
 
 ## Quick Start: CPU (Recommended)
 
@@ -109,6 +118,24 @@ docker run --rm \
   /workspace/target/release/examples/test_gpu
 ```
 
+### Quick Start: CUDA (NVIDIA GPU)
+
+Build the CUDA-enabled extproc image and run it with the NVIDIA runtime:
+
+```bash
+docker build -f tools/docker/Dockerfile.extproc-cuda -t semantic-router:cuda .
+docker run --gpus all \
+  -e AI_BINDING=onnx \
+  -v /path/to/config.yaml:/app/config/config.yaml \
+  semantic-router:cuda
+```
+
+Device selection is driven by ONNX Runtime execution providers, not a separate
+`AI_BINDING` value: use `AI_BINDING=onnx` together with `use_cpu: false` in the
+config, and the CUDA image routes inference to `CUDAExecutionProvider`. The CUDA
+image sets `ORT_DYLIB_PATH` to a CUDA-enabled `libonnxruntime.so` installed from
+`onnxruntime-gpu`.
+
 ## Installation
 
 ### Prerequisites
@@ -131,8 +158,14 @@ This is the recommended configuration. CPU performance equals GPU for this model
 # AMD GPU (ROCm)
 cargo build --release --features rocm
 
+# AMD GPU (ROCm, dynamic loading - for containers)
+cargo build --release --features rocm-dynamic
+
 # NVIDIA GPU (CUDA)
 cargo build --release --features cuda
+
+# NVIDIA GPU (CUDA, dynamic loading - for containers)
+cargo build --release --features cuda-dynamic
 ```
 
 GPU support is optional - only use if you have specific infrastructure requirements.

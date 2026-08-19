@@ -32,6 +32,7 @@ var maintainedFullConfigAssets = []string{
 	repoRel("e2e", "config", "config.testing.yaml"),
 	repoRel("e2e", "config", "onnx-binding", "config.onnx-binding-test.yaml"),
 	repoRel("e2e", "config", "onnx-binding", "config.onnx-classifiers-test.yaml"),
+	repoRel("e2e", "config", "onnx-binding", "config.onnx-cuda-test.yaml"),
 	repoRel("e2e", "profiles", "routing-strategies", "config-with-embedding.yaml"),
 	repoRel("bench", "hallucination", "config.yaml"),
 	repoRel("bench", "hallucination", "config-7b.yaml"),

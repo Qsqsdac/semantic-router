@@ -28,6 +28,13 @@ docker-build-extproc-rocm:
 	@echo "Building extproc-rocm Docker image (x86_64 only, ROCm 7.0)..."
 	@$(CONTAINER_RUNTIME) build -f tools/docker/Dockerfile.extproc-rocm -t $(DOCKER_REGISTRY)/extproc-rocm:$(DOCKER_TAG) .
 
+# Build extproc-cuda Docker image (NVIDIA GPU / CUDA, x86_64 only)
+docker-build-extproc-cuda: ## Build extproc-cuda Docker image (NVIDIA GPU)
+docker-build-extproc-cuda:
+	@$(LOG_TARGET)
+	@echo "Building extproc-cuda Docker image (x86_64 only, CUDA 12.6)..."
+	@$(CONTAINER_RUNTIME) build -f tools/docker/Dockerfile.extproc-cuda -t $(DOCKER_REGISTRY)/extproc-cuda:$(DOCKER_TAG) .
+
 # Build llm-katan Docker image
 docker-build-llm-katan: ## Build llm-katan Docker image
 docker-build-llm-katan:
@@ -106,6 +113,12 @@ docker-push-extproc-rocm:
 	@$(LOG_TARGET)
 	@echo "Pushing extproc-rocm Docker image..."
 	@$(CONTAINER_RUNTIME) push $(DOCKER_REGISTRY)/extproc-rocm:$(DOCKER_TAG)
+
+docker-push-extproc-cuda: ## Push extproc-cuda Docker image
+docker-push-extproc-cuda:
+	@$(LOG_TARGET)
+	@echo "Pushing extproc-cuda Docker image..."
+	@$(CONTAINER_RUNTIME) push $(DOCKER_REGISTRY)/extproc-cuda:$(DOCKER_TAG)
 
 docker-push-llm-katan: ## Push llm-katan Docker image
 docker-push-llm-katan:

@@ -5,6 +5,8 @@ This directory contains Dockerfiles used across the project.
 - `tools/docker/Dockerfile`: development base image (CentOS Stream) with toolchains (Rust, Go, Envoy, HF CLI).
 - `tools/docker/Dockerfile.extproc`: builds the `extproc` image (single-platform, used for PR amd64-only builds).
 - `tools/docker/Dockerfile.extproc.cross`: cross-compilation optimized `extproc` Dockerfile (used for multi-arch push/dispatch builds).
+- `tools/docker/Dockerfile.extproc-rocm`: `extproc` image for AMD GPU (ROCm 7.0, x86_64 only).
+- `tools/docker/Dockerfile.extproc-cuda`: `extproc` image for NVIDIA GPU (CUDA 12.6, x86_64 only).
 - `tools/docker/Dockerfile.precommit`: pre-commit / lint tooling image for CI and local use.
 
 ## Build optimization (CI)

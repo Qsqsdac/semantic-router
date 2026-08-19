@@ -6,20 +6,90 @@ set -euo pipefail
 # What this script does:
 # 1) Creates a temporary Dockerfile with mirror/proxy rewrites.
 # 2) Removes heavyweight optional Python dependency installs for faster build.
-# 3) Builds local image: ghcr.io/vllm-project/semantic-router/vllm-sr:latest
-# 4) Optionally starts vllm-sr with --image-pull-policy never.
+# 3) Builds local image (CPU: ghcr.io/vllm-project/semantic-router/vllm-sr:latest
+#    | GPU: semantic-router:cuda via tools/docker/Dockerfile.extproc-cuda).
+# 4) Optionally starts the stack.
+#
+# GPU mode (NVIDIA, ONNX Runtime CUDA EP):
+#   VLLM_SR_GPU=1 ./scripts/build_local_weak_network.sh
+#   - Builds semantic-router:cuda (ONNX-only, cuda-dynamic feature).
+#   - Starts with `docker run --gpus all -e AI_BINDING=onnx`.
+#   - API port honors VLLM_SR_PORT_OFFSET (default 200) -> 8280 when 8080 is taken.
+#   - Models are bind-mounted from src/vllm-sr/models to /app/models.
+#
+# Env knobs:
+#   VLLM_SR_GPU          - set to 1 for NVIDIA GPU (ONNX+CUDA) build/start
+#   VLLM_SR_IMAGE        - override built image name (default per mode)
+#   VLLM_SR_API_PORT     - base API port for GPU mode (default 8080; +offset = published)
+#   VLLM_SR_CONFIG       - config file for GPU mode (default src/vllm-sr/config.yaml)
+#   VLLM_SR_STACK_NAME / VLLM_SR_PORT_OFFSET / START_AFTER_BUILD / HF_TOKEN
+#   GITHUB_MIRROR_PREFIX - optional github mirror for candle builds (CPU mode only)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${ROOT_DIR}/../.." && pwd)"
 
+GPU_MODE="${VLLM_SR_GPU:-0}"
+
 TMP_DOCKERFILE="/tmp/Dockerfile.vllm-sr.local"
-IMAGE="ghcr.io/vllm-project/semantic-router/vllm-sr:latest"
+IMAGE="${VLLM_SR_IMAGE:-ghcr.io/vllm-project/semantic-router/vllm-sr:latest}"
+if [[ "${GPU_MODE}" == "1" ]]; then
+	IMAGE="${VLLM_SR_IMAGE:-semantic-router:cuda}"
+	GPU_DOCKERFILE="${REPO_ROOT}/tools/docker/Dockerfile.extproc-cuda"
+fi
 
 STACK_NAME="${VLLM_SR_STACK_NAME:-lane-b}"
 PORT_OFFSET="${VLLM_SR_PORT_OFFSET:-200}"
 START_AFTER_BUILD="${START_AFTER_BUILD:-1}"
 GITHUB_MIRROR_PREFIX="${GITHUB_MIRROR_PREFIX:-}"
+
+# GPU mode: build the ONNX+CUDA image directly (Dockerfile already carries
+# weak-network mirror fixes: goproxy.cn / rsproxy.cn / aliyun PyPI).
+if [[ "${GPU_MODE}" == "1" ]]; then
+	echo "[1/4] GPU mode: using ${GPU_DOCKERFILE}"
+	cp "${GPU_DOCKERFILE}" "${TMP_DOCKERFILE}"
+
+	echo "[2/4] Build GPU image: ${IMAGE}"
+	pkill -f "docker build .*${IMAGE}.*${TMP_DOCKERFILE}" 2>/dev/null || true
+	cd "${REPO_ROOT}"
+	docker build --network host --progress=plain \
+		--build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn \
+		--build-arg GOPROXY=https://goproxy.cn,direct \
+		-t "${IMAGE}" -f "${TMP_DOCKERFILE}" .
+
+	echo "[3/4] Verify image exists"
+	docker image inspect "${IMAGE}" >/dev/null
+	echo "Image OK: ${IMAGE}"
+
+	if [[ "${START_AFTER_BUILD}" != "1" ]]; then
+		echo "[4/4] Skip start (START_AFTER_BUILD=${START_AFTER_BUILD})"
+		exit 0
+	fi
+
+	# GPU run: host network + --gpus all + AI_BINDING=onnx.
+	# Publish API on base port + offset (8080+200=8280) to avoid conflicts.
+	GPU_CONFIG="${VLLM_SR_CONFIG:-${ROOT_DIR}/config.yaml}"
+	GPU_API_BASE="${VLLM_SR_API_PORT:-8080}"
+	GPU_API_PUBLISHED=$((GPU_API_BASE + PORT_OFFSET))
+	GPU_CONTAINER="sr-${STACK_NAME}"
+	MODELS_DIR="${ROOT_DIR}/models"
+
+	echo "[4/4] Start GPU stack: ${IMAGE} (api ${GPU_API_PUBLISHED})"
+	docker rm -f "${GPU_CONTAINER}" 2>/dev/null || true
+	docker run -d --name "${GPU_CONTAINER}" \
+		--network host \
+		--gpus all \
+		-e AI_BINDING=onnx \
+		-v "${GPU_CONFIG}:/app/config/config.yaml:ro" \
+		-v "${MODELS_DIR}:/app/models" \
+		"${IMAGE}" \
+		--api-port="${GPU_API_PUBLISHED}" >/dev/null
+
+	echo "GPU container started: ${GPU_CONTAINER}"
+	echo "  API:      http://localhost:${GPU_API_PUBLISHED}/api/v1/classify/intent"
+	echo "  Verify:   docker logs -f ${GPU_CONTAINER} | grep 'Using CUDA execution provider'"
+	exit 0
+fi
 
 echo "[1/5] Prepare temporary Dockerfile: ${TMP_DOCKERFILE}"
 cp "${ROOT_DIR}/Dockerfile" "${TMP_DOCKERFILE}"

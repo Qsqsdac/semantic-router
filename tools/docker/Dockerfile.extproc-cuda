@@ -1,0 +1,213 @@
+# CUDA 12.x + ONNX Runtime Dockerfile for NVIDIA GPU inference.
+# x86_64 only.
+# Defaults to AI_BINDING=onnx so the ONNX Runtime CUDA execution provider is used.
+#
+# Build:
+#   docker build -f tools/docker/Dockerfile.extproc-cuda -t semantic-router:cuda .
+#
+# Run (requires nvidia-container-toolkit):
+#   docker run --gpus all \
+#     -e AI_BINDING=onnx \
+#     -v /path/to/config.yaml:/app/config/config.yaml \
+#     semantic-router:cuda
+
+# ============================================================================
+# Stage 2: Build onnx-binding Rust library with CUDA support
+# Uses cuda-dynamic feature (dlopen at runtime, no link-time ORT dependency).
+# ort 2.0.0-rc.10 targets ORT 1.22, matching onnxruntime-gpu on PyPI.
+# ============================================================================
+FROM rust:1.90 AS onnx-cuda-builder
+
+# APT_MIRROR lets regional mirrors be used for the clang/lld packages.
+ARG APT_MIRROR=deb.debian.org
+RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
+        sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && apt-get install -y \
+    build-essential pkg-config lld clang libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+ENV CARGO_REGISTRIES_CRATES_IO_INDEX=https://rsproxy.cn/crates.io-index
+ENV CARGO_NET_RETRY=20
+ENV CARGO_HTTP_TIMEOUT=120 \
+    CARGO_INCREMENTAL=1 \
+    CARGO_PROFILE_RELEASE_LTO=thin \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+
+WORKDIR /app
+
+COPY onnx-binding/Cargo.toml onnx-binding/Cargo.loc[k] ./onnx-binding/
+
+RUN cd onnx-binding && mkdir -p src && echo "pub fn _dummy() {}" > src/lib.rs && \
+    OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu \
+    cargo build --release --features cuda-dynamic --target x86_64-unknown-linux-gnu && \
+    rm -rf src
+
+COPY onnx-binding/src/ ./onnx-binding/src/
+
+RUN cd onnx-binding && \
+    find target -name "libonnx_semantic_router.so" -delete 2>/dev/null; \
+    find target -name "libonnx_semantic_router.a" -delete 2>/dev/null; \
+    OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu \
+    cargo build --release --features cuda-dynamic --target x86_64-unknown-linux-gnu && \
+    echo "=== Verifying ONNX-CUDA library ===" && \
+    find target -name "libonnx_semantic_router.so" -type f -exec ls -la {} \;
+
+# ============================================================================
+# Stage 3: Build ml-binding Rust library
+# ============================================================================
+FROM rust:1.90 AS ml-builder
+
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+ENV CARGO_REGISTRIES_CRATES_IO_INDEX=https://rsproxy.cn/crates.io-index
+ENV CARGO_NET_RETRY=20
+ENV CARGO_HTTP_TIMEOUT=120
+
+WORKDIR /app
+
+COPY ml-binding/Cargo.toml ml-binding/Cargo.loc[k] ./ml-binding/
+
+RUN cd ml-binding && mkdir -p src && echo "pub fn _dummy() {}" > src/lib.rs && \
+    cargo build --release --target x86_64-unknown-linux-gnu && rm -rf src
+
+COPY ml-binding/src/ ./ml-binding/src/
+
+RUN cd ml-binding && \
+    find target -name "libml_semantic_router.so" -delete 2>/dev/null; \
+    cargo build --release --target x86_64-unknown-linux-gnu
+
+# ============================================================================
+# Stage 4: Build nlp-binding Rust library
+# ============================================================================
+FROM rust:1.90 AS nlp-builder
+
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+ENV CARGO_REGISTRIES_CRATES_IO_INDEX=https://rsproxy.cn/crates.io-index
+ENV CARGO_NET_RETRY=20
+ENV CARGO_HTTP_TIMEOUT=120
+
+WORKDIR /app
+
+COPY nlp-binding/Cargo.toml nlp-binding/Cargo.loc[k] ./nlp-binding/
+
+RUN cd nlp-binding && mkdir -p src && echo "pub fn _dummy() {}" > src/lib.rs && \
+    cargo build --release --target x86_64-unknown-linux-gnu && rm -rf src
+
+COPY nlp-binding/src/ ./nlp-binding/src/
+
+RUN cd nlp-binding && \
+    find target -name "libnlp_binding.so" -delete 2>/dev/null; \
+    cargo build --release --target x86_64-unknown-linux-gnu
+
+# ============================================================================
+# Stage 5: Build Go application (both candle and onnx binaries)
+# ============================================================================
+FROM golang:1.24 AS go-builder
+
+# GOPROXY is configurable so regional mirrors can be used (e.g. https://goproxy.cn,direct)
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
+
+# APT_MIRROR lets regional mirrors be used for apt packages.
+ARG APT_MIRROR=deb.debian.org
+RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
+        sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && apt-get install -y libssl-dev file && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy Go module files
+RUN mkdir -p src/semantic-router
+COPY src/semantic-router/go.mod src/semantic-router/go.sum src/semantic-router/
+COPY src/semantic-router/go.onnx.mod src/semantic-router/go.onnx.sum src/semantic-router/
+COPY onnx-binding/go.mod onnx-binding/semantic-router.go onnx-binding/
+COPY ml-binding/go.mod ml-binding/ml_binding.go ml-binding/
+COPY nlp-binding/go.mod nlp-binding/nlp_binding.go nlp-binding/nlp_binding_mock.go nlp-binding/
+
+RUN cd src/semantic-router && go mod download -modfile=go.onnx.mod
+
+COPY src/semantic-router/ src/semantic-router/
+
+# Copy Rust libraries from builder stages (x86_64 only)
+COPY --from=onnx-cuda-builder /app/onnx-binding/target/x86_64-unknown-linux-gnu/release/libonnx_semantic_router.so /app/onnx-binding/target/release/
+COPY --from=ml-builder /app/ml-binding/target/x86_64-unknown-linux-gnu/release/libml_semantic_router.so /app/ml-binding/target/release/
+COPY --from=nlp-builder /app/nlp-binding/target/x86_64-unknown-linux-gnu/release/libnlp_binding.so /app/nlp-binding/target/release/
+
+ENV CGO_ENABLED=1 \
+    LD_LIBRARY_PATH=/app/onnx-binding/target/release:/app/ml-binding/target/release:/app/nlp-binding/target/release \
+    GOOS=linux GOARCH=amd64
+
+# Verify libraries
+RUN echo "=== Verifying libraries ===" && \
+    file /app/onnx-binding/target/release/libonnx_semantic_router.so && \
+    file /app/ml-binding/target/release/libml_semantic_router.so && \
+    file /app/nlp-binding/target/release/libnlp_binding.so
+
+# Build onnx router binary (uses go.onnx.mod which replaces candle-binding => onnx-binding)
+RUN mkdir -p bin && cd src/semantic-router && \
+    CGO_CFLAGS="-I/app/onnx-binding" \
+    CGO_LDFLAGS="-L/app/onnx-binding/target/release -L/app/ml-binding/target/release -L/app/nlp-binding/target/release -lonnx_semantic_router -lml_semantic_router -lnlp_binding" \
+    go build -modfile=go.onnx.mod -tags=onnx -ldflags="-w -s" -o ../../bin/router-onnx ./cmd
+
+# Collect shared libraries for final image
+RUN mkdir -p /app/lib && \
+    cp /app/onnx-binding/target/release/libonnx_semantic_router.so /app/lib/ && \
+    cp /app/ml-binding/target/release/libml_semantic_router.so /app/lib/ && \
+    cp /app/nlp-binding/target/release/libnlp_binding.so /app/lib/ && \
+    echo "=== Staged libraries ===" && ls -la /app/lib/
+
+# ============================================================================
+# Final stage: NVIDIA CUDA + cuDNN runtime image with CUDA ONNX Runtime
+# onnxruntime-gpu 1.22.x links against system CUDA 12 + cuDNN 9 libraries
+# (libcublas, libcudnn.so.9, ...), so the base image must include cuDNN.
+# ============================================================================
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
+
+# Install runtime dependencies (pip is only used to obtain the ORT shared library)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates openssl python3-pip && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install the CUDA-enabled ONNX Runtime wheel (ORT 1.22 series to match ort 2.0.0-rc.10 ABI)
+# Note: also install CLI extras explicitly (click/typer/rich) because the system
+# pip 22.0.2 does not reliably resolve huggingface_hub[cli] extras on this image.
+RUN pip3 install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple \
+    onnxruntime-gpu==1.22.0 \
+    'huggingface_hub[cli]==1.5.0' \
+    click \
+    typer \
+    rich && \
+    ORT_DIR=/usr/local/lib/python3.10/dist-packages/onnxruntime/capi && \
+    ln -sf "$ORT_DIR"/libonnxruntime.so.* "$ORT_DIR/libonnxruntime.so" && \
+    echo "=== Verifying CUDA ONNX Runtime library ===" && \
+    test -f "$ORT_DIR/libonnxruntime.so" && \
+    ldd "$ORT_DIR/libonnxruntime.so" && \
+    echo "=== Verifying CUDA provider dependencies (cuDNN/CUDA) ===" && \
+    ldd "$ORT_DIR/libonnxruntime_providers_cuda.so" | grep -iE "cudnn|cublas|cudart|not found" && \
+    ls -la "$ORT_DIR"
+
+WORKDIR /app
+
+# Copy both router binaries
+COPY --from=go-builder /app/bin/router-onnx /app/router-onnx
+
+# Copy Rust shared libraries
+COPY --from=go-builder /app/lib/ /app/lib/
+
+COPY config/config.yaml /app/config/
+COPY scripts/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Point ort to the CUDA-enabled ORT library and set library paths
+ENV ORT_DYLIB_PATH=/usr/local/lib/python3.10/dist-packages/onnxruntime/capi/libonnxruntime.so \
+    LD_LIBRARY_PATH=/app/lib:/usr/local/lib/python3.10/dist-packages/onnxruntime/capi:/usr/local/cuda/lib64 \
+    AI_BINDING=onnx
+
+EXPOSE 50051
+
+ENTRYPOINT ["/app/entrypoint.sh"]

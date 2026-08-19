@@ -1,5 +1,14 @@
 # 构建项目
+
+## CPU 模式（默认）
+```bash
 START_AFTER_BUILD=0 ./scripts/build_local_weak_network.sh
+```
+
+## NVIDIA GPU 模式（ONNX Runtime CUDA EP）
+```bash
+VLLM_SR_GPU=1 START_AFTER_BUILD=0 ./scripts/build_local_weak_network.sh
+```
 
 # 挂起服务
 VLLM_SR_STACK_NAME=lane-b VLLM_SR_PORT_OFFSET=200 vllm-sr serve --minimal

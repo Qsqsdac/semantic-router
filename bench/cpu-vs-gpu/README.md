@@ -1,19 +1,32 @@
 # CPU vs GPU / SDPA vs FA / BUFFERED vs STREAMED Benchmarks
 
-Measures signal extraction latency (jailbreak, PII, domain) for ONNX Runtime on AMD ROCm GPUs via Envoy ext_proc, using Prometheus histograms.
+Measures signal extraction latency (jailbreak, PII, domain) for ONNX Runtime on AMD ROCm and NVIDIA CUDA GPUs via Envoy ext_proc, using Prometheus histograms.
+
+## Backend Matrix
+
+| Backend | Device | Status |
+|---|---|---|
+| Candle | CPU | Supported |
+| ONNX Runtime | CPU | Supported |
+| ONNX Runtime | ROCm (AMD) | Supported |
+| ONNX Runtime | CUDA (NVIDIA) | Supported |
 
 ## Prerequisites
 
-- AMD GPU with ROCm 7.0+ (`/dev/kfd`, `/dev/dri`)
+- AMD GPU with ROCm 7.0+ (`/dev/kfd`, `/dev/dri`) **or** NVIDIA GPU with `nvidia-container-toolkit`
 - Docker
 - `envoyproxy/envoy:v1.33-latest` image
 
 ## Setup
 
-Build the router image (includes CK Flash Attention custom op):
+Build the router image:
 
 ```bash
+# AMD ROCm (includes CK Flash Attention custom op)
 docker build -f tools/docker/Dockerfile.extproc-rocm -t semantic-router:rocm .
+
+# NVIDIA CUDA
+docker build -f tools/docker/Dockerfile.extproc-cuda -t semantic-router:cuda .
 ```
 
 Download models into `bench/cpu-vs-gpu/models/`:
@@ -66,6 +79,19 @@ CANDLE_IMAGE=semantic-router:candle-bench \
 REQUESTS_PER_SIZE=10 ./bench-3way.sh
 ```
 
+### ONNX CUDA (NVIDIA GPU)
+
+Runs the ONNX CUDA path with `--gpus all` and verifies the CUDA execution provider:
+
+```bash
+BENCH_IMAGE=semantic-router:cuda \
+REQUESTS_PER_SIZE=10 ./bench-onnx-cuda.sh
+```
+
+This uses `config-bench-cuda.yaml`, which sets `use_cpu: false` for the embedding
+and classifier models, and reports jailbreak/domain/PII extraction latency plus
+end-to-end latency through Envoy.
+
 ### BUFFERED vs STREAMED (E2E body mode comparison)
 
 Compares the original Envoy `BUFFERED` body mode (full `json.Unmarshal`/`Marshal`) against the new `STREAMED` mode with gjson/sjson fast-path JSON processing, semi-streaming chunked body delivery, and prompt compression.
@@ -107,10 +133,12 @@ Reports are written to `results/`.
 | File | Description |
 |------|-------------|
 | `bench-3way.sh` | ONNX GPU vs ONNX CPU vs Candle CPU latency comparison |
+| `bench-onnx-cuda.sh` | ONNX CUDA (NVIDIA GPU) latency comparison |
 | `bench-long-context.sh` | CPU vs GPU, multi token-size, Prometheus metrics |
 | `bench-sdpa-vs-fa.sh` | SDPA vs FA on GPU, Prometheus metrics |
 | `bench-buffered-vs-streamed.sh` | BUFFERED vs STREAMED body mode, builds patched binary inside container |
 | `config-bench.yaml` | Canonical v0.3 router config template for ONNX benchmarks |
+| `config-bench-cuda.yaml` | ONNX CUDA benchmark config (`use_cpu: false`) |
 | `config-bench-candle.yaml` | Canonical v0.3 router config template for Candle CPU benchmarks |
 | `envoy-bench.yaml` | Envoy ext_proc proxy config (STREAMED mode) |
 | `envoy-bench-fa.yaml` | Envoy ext_proc proxy config for FA benchmarks |
