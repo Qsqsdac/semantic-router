@@ -169,8 +169,9 @@ RUN mkdir -p /app/lib && \
 FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
 
 # Install runtime dependencies (pip is only used to obtain the ORT shared library)
+# curl is required by `vllm-sr serve` health checks (docker exec ... curl /health).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates openssl python3-pip && \
+    ca-certificates openssl python3-pip curl && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install the CUDA-enabled ONNX Runtime wheel (ORT 1.22 series to match ort 2.0.0-rc.10 ABI)
