@@ -40,6 +40,14 @@ def docker_start_vllm_sr(
     """
     runtime = get_container_runtime()
     env_vars = dict(env_vars or {})
+    # Always point the container at the config vllm-sr serve mounts at
+    # /app/config.yaml, regardless of VLLM_SR_GPU. The GPU image entrypoint
+    # (scripts/entrypoint.sh) reads CONFIG_FILE (default /app/config/config.yaml
+    # = repo-root config baked into the image, which triggers heavy model
+    # downloads); the CPU image (supervisord) ignores CONFIG_FILE and already
+    # reads /app/config.yaml. Setting it unconditionally keeps the mounted
+    # config authoritative for every mode.
+    env_vars.setdefault("CONFIG_FILE", "/app/config.yaml")
     stack_layout = stack_layout or resolve_runtime_stack()
 
     normalized_platform = _resolve_platform(env_vars)
@@ -50,6 +58,7 @@ def docker_start_vllm_sr(
 
     cmd = _build_base_run_command(runtime, nofile_limit, network_name, stack_layout)
     _append_amd_gpu_passthrough(cmd, normalized_platform)
+    _append_nvidia_gpu_passthrough(cmd, runtime)
     _append_host_gateway(cmd, runtime)
     _append_listener_and_service_ports(cmd, listeners, minimal, stack_layout)
 
@@ -119,6 +128,26 @@ def _build_base_run_command(runtime, nofile_limit, network_name, stack_layout):
     if network_name:
         cmd.extend(["--network", network_name])
     return cmd
+
+
+def _append_nvidia_gpu_passthrough(cmd, runtime):
+    """Add --gpus all when VLLM_SR_GPU=1 (NVIDIA, ONNX Runtime CUDA EP).
+
+    Mirrors the GPU branch of scripts/build_local_weak_network.sh. Requires
+    the docker runtime with nvidia-container-toolkit on the host.
+    """
+    if os.getenv("VLLM_SR_GPU", "0") != "1":
+        return
+    if runtime != "docker":
+        log.warning(
+            "VLLM_SR_GPU=1 requires the docker runtime with nvidia-container-toolkit; "
+            f"current runtime is '{runtime}', skipping --gpus all."
+        )
+        return
+    cmd.extend(["--gpus", "all"])
+    # CONFIG_FILE is injected unconditionally in docker_start_vllm_sr, so every
+    # mode loads the config vllm-sr serve mounts at /app/config.yaml.
+    log.info("VLLM_SR_GPU=1 detected, adding --gpus all (NVIDIA CUDA)")
 
 
 def _append_amd_gpu_passthrough(cmd, normalized_platform):

@@ -76,6 +76,10 @@ def _select_image_source(image, normalized_platform):
             f"{selected_image}"
         )
         return selected_image
+    if os.getenv("VLLM_SR_GPU", "0") == "1":
+        cuda_image = os.getenv("VLLM_SR_IMAGE_CUDA", "semantic-router:cuda").strip()
+        log.info(f"VLLM_SR_GPU=1 detected, using NVIDIA CUDA image: {cuda_image}")
+        return cuda_image
     log.info(f"Using default image: {VLLM_SR_DOCKER_IMAGE_DEFAULT}")
     return VLLM_SR_DOCKER_IMAGE_DEFAULT
 
