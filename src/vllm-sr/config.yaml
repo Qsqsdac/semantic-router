@@ -47,131 +47,58 @@ routing:
       description: "Fast default text model"
       capabilities: ["chat", "reasoning"]
     - name: "MoM-large"
-      description: "Higher quality model for complex domain intents"
+      description: "Higher quality model for requests that need fact check"
       capabilities: ["chat", "reasoning", "long-context"]
 
-  # Intent-only unit test setup: keep only domain signal.
+  # Fact-check unit test setup: keep only fact_check signal.
   signals:
-    domains:
-      - name: "biology"
-        description: "Biology and life sciences queries."
-        mmlu_categories: [biology]
-      - name: "business"
-        description: "Business and management queries."
-        mmlu_categories: [business]
-      - name: "chemistry"
-        description: "Chemistry queries."
-        mmlu_categories: [chemistry]
-      - name: "computer science"
-        description: "Computer science and software engineering queries."
-        mmlu_categories: ["computer science"]
-      - name: "economics"
-        description: "Economics and finance theory queries."
-        mmlu_categories: [economics]
-      - name: "engineering"
-        description: "Engineering and applied technical queries."
-        mmlu_categories: [engineering]
-      - name: "health"
-        description: "Health and medical queries."
-        mmlu_categories: [health]
-      - name: "history"
-        description: "History queries."
-        mmlu_categories: [history]
-      - name: "law"
-        description: "Legal and regulatory queries."
-        mmlu_categories: [law]
-      - name: "math"
-        description: "Math and quantitative reasoning queries."
-        mmlu_categories: [math]
-      - name: "philosophy"
-        description: "Philosophy and ethics queries."
-        mmlu_categories: [philosophy]
-      - name: "physics"
-        description: "Physics queries."
-        mmlu_categories: [physics]
-      - name: "psychology"
-        description: "Psychology and behavior queries."
-        mmlu_categories: [psychology]
-      - name: "other"
-        description: "General fallback traffic."
-        mmlu_categories: [other]
+    fact_check:
+      - name: "needs_fact_check"
+        description: "Prompts with factual claims that should be verified."
+      - name: "no_fact_check_needed"
+        description: "Creative prompts that do not need factual verification."
 
-  # Intent-only unit test setup: keep only domain decisions.
+  # Fact-check-focused route set: one explicit route and one fallback.
   decisions:
-    - name: "domain_large_model_route"
-      description: "Complex intent categories route to large model."
+    - name: "fact_check_route"
+      description: "Requests needing fact-check route to stronger model."
       priority: 200
       rules:
-        operator: OR
+        operator: AND
         conditions:
-          - type: domain
-            name: "biology"
-          - type: domain
-            name: "chemistry"
-          - type: domain
-            name: "computer science"
-          - type: domain
-            name: "engineering"
-          - type: domain
-            name: "health"
-          - type: domain
-            name: "law"
-          - type: domain
-            name: "math"
-          - type: domain
-            name: "physics"
+          - type: fact_check
+            name: "needs_fact_check"
       modelRefs:
         - model: MoM-large
           use_reasoning: true
       algorithm:
         type: static
-      plugins:
-        - type: semantic-cache
-          configuration:
-            enabled: true
-            similarity_threshold: 0.85
-            ttl_seconds: 7200
 
-    - name: "domain_small_model_route"
-      description: "Remaining intent categories route to small model."
+    - name: "default_route"
+      description: "Fallback for prompts not requiring fact-check."
       priority: 100
       rules:
-        operator: OR
-        conditions:
-          - type: domain
-            name: "business"
-          - type: domain
-            name: "economics"
-          - type: domain
-            name: "history"
-          - type: domain
-            name: "philosophy"
-          - type: domain
-            name: "psychology"
-          - type: domain
-            name: "other"
+        operator: AND
+        conditions: []
       modelRefs:
         - model: MoM
           use_reasoning: false
       algorithm:
         type: static
-      plugins:
-        - type: semantic-cache
-          configuration:
-            enabled: true
-            similarity_threshold: 0.85
-            ttl_seconds: 7200
 
 global:
   model_catalog:
     modules:
-      classifier:
-        domain:
-          intent_match_mode: bert
+      hallucination_mitigation:
+        enabled: true
+        fact_check:
+          model_ref: fact_check_classifier
+          model_id: models/mmbert32k-factcheck-classifier-merged
+          mode: svm_only
+          threshold: 0.65
+          svm_fallback_threshold: 0.7
           use_cpu: false
-          intent_fasttext_threshold: 0.6
-          intent_fasttext_model_path: /app/intent-assets/models/intent_fasttext.bin
-
+          use_mmbert_32k: true
   stores:
     semantic_cache:
       enabled: false

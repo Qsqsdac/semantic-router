@@ -108,7 +108,7 @@ global:
         mmbert_model_path: models/mom-embedding-ultra
         multimodal_model_path: models/mom-embedding-multimodal
         bert_model_path: models/mom-embedding-light
-        use_cpu: true
+        use_cpu: false
         embedding_config:
           model_type: mmbert
           preload_embeddings: true

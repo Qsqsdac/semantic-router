@@ -170,10 +170,10 @@ global:
           intent_match_mode: bert
           intent_keyword_mapping_path: /app/intent-assets/intent_keyword_mapping.json
           intent_keyword_case_sensitive: false
-          intent_fasttext_model_path: /app/intent-assets/models/intent_fasttext.bin
-          intent_fasttext_binary_path: /app/intent-assets/bin/fasttext.real
+          use_cpu: false
           intent_fasttext_threshold: 0.6
-          intent_fasttext_timeout_seconds: 2
+          intent_fasttext_model_path: /app/intent-assets/models/intent_fasttext.bin
+
   stores:
     semantic_cache:
       enabled: false

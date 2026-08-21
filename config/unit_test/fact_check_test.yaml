@@ -97,7 +97,7 @@ global:
           mode: bert
           threshold: 0.65
           svm_fallback_threshold: 0.7
-          use_cpu: true
+          use_cpu: false
           use_mmbert_32k: true
   stores:
     semantic_cache:
