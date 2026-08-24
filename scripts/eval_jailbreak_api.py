@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-import concurrent.futures
 import json
 import statistics
 import time
@@ -70,12 +69,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=20,
         help="HTTP timeout in seconds",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=1,
-        help="Concurrent request workers for batch performance testing",
     )
     parser.add_argument(
         "--output-dir",
@@ -352,34 +345,11 @@ def main() -> None:
     api_latencies: List[float] = []
     model_latencies: List[float] = []
 
-    worker_count = max(1, int(args.workers))
-    if worker_count == 1:
-        for idx, sample in enumerate(samples, start=1):
-            row = evaluate_one(idx, sample, args.dataset, args.router_url, args.timeout)
-            details.append(row)
-            if idx % 100 == 0:
-                print(f"[progress] {idx}/{total}")
-    else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-            futures = {
-                executor.submit(
-                    evaluate_one,
-                    idx,
-                    sample,
-                    args.dataset,
-                    args.router_url,
-                    args.timeout,
-                ): idx
-                for idx, sample in enumerate(samples, start=1)
-            }
-            completed = 0
-            for future in concurrent.futures.as_completed(futures):
-                row = future.result()
-                details.append(row)
-                completed += 1
-                if completed % 100 == 0:
-                    print(f"[progress] {completed}/{total}")
-        details.sort(key=lambda item: item["index"])
+    for idx, sample in enumerate(samples, start=1):
+        row = evaluate_one(idx, sample, args.dataset, args.router_url, args.timeout)
+        details.append(row)
+        if idx % 100 == 0:
+            print(f"[progress] {idx}/{total}")
 
     for row in details:
         if row.get("status") != "ok":

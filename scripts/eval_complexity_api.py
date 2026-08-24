@@ -10,7 +10,6 @@
 示例：
 python scripts/eval_complexity_api.py \
   --router-url http://localhost:8080 \
-  --workers 4 \
   --max-samples 1000 \
   --output-dir reports/classification-complexity
 """
@@ -19,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-import concurrent.futures
 import json
 import time
 from pathlib import Path
@@ -70,12 +68,6 @@ def parse_args() -> argparse.Namespace:
 		type=int,
 		default=20,
 		help="HTTP timeout in seconds",
-	)
-	parser.add_argument(
-		"--workers",
-		type=int,
-		default=1,
-		help="Concurrent request workers for batch performance testing",
 	)
 	parser.add_argument(
 		"--rule-name",
@@ -348,34 +340,11 @@ def main() -> None:
 	started = time.time()
 	details: List[Dict[str, Any]] = []
 
-	worker_count = max(1, int(args.workers))
-	if worker_count == 1:
-		for idx, sample in enumerate(samples, start=1):
-			row = evaluate_one(idx, sample, args.router_url, args.timeout, args.rule_name)
-			details.append(row)
-			if idx % 100 == 0:
-				print(f"[progress] {idx}/{total}")
-	else:
-		with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-			futures = {
-				executor.submit(
-					evaluate_one,
-					idx,
-					sample,
-					args.router_url,
-					args.timeout,
-					args.rule_name,
-				): idx
-				for idx, sample in enumerate(samples, start=1)
-			}
-			completed = 0
-			for future in concurrent.futures.as_completed(futures):
-				row = future.result()
-				details.append(row)
-				completed += 1
-				if completed % 100 == 0:
-					print(f"[progress] {completed}/{total}")
-		details.sort(key=lambda item: item["index"])
+	for idx, sample in enumerate(samples, start=1):
+		row = evaluate_one(idx, sample, args.router_url, args.timeout, args.rule_name)
+		details.append(row)
+		if idx % 100 == 0:
+			print(f"[progress] {idx}/{total}")
 
 	ok_count = 0
 	fail_count = 0
