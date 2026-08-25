@@ -28,6 +28,19 @@ static_resources:
               routes:
               {% for model in models %}
               # Route for model: {{ model.name }}
+              {% if model.path_prefix %}
+              - match:
+                  prefix: "{{ model.path_prefix }}"
+                  headers:
+                  - name: x-selected-model
+                    string_match:
+                      exact: "{{ model.name }}"
+                route:
+                  cluster: {{ model.cluster_name }}_cluster
+                  timeout: {{ listener.timeout | default('1200s') }}
+                  idleTimeout: 1200s
+                  host_rewrite_literal: "{{ model.endpoints[0].address }}"
+              {% endif %}
               - match:
                   prefix: "/"
                   headers:
@@ -41,12 +54,15 @@ static_resources:
                   # Rewrite Host header to match upstream server
                   host_rewrite_literal: "{{ model.endpoints[0].address }}"
                   {% if model.path_prefix %}
-                  # Prepend path prefix to all requests (e.g., /compatible-mode + /v1/chat/completions = /compatible-mode/v1/chat/completions)
+                  {% if model.path_prefix %}
+                  # Requests without the endpoint path are rewritten below; requests
+                  # that already have it match the route above.
                   regex_rewrite:
                     pattern:
                       google_re2: {}
                       regex: "^(.*)$"
                     substitution: "{{ model.path_prefix }}\\1"
+                  {% endif %}
                   {% endif %}
               {% endfor %}
               {% for model in anthropic_models %}
@@ -63,6 +79,17 @@ static_resources:
                   idleTimeout: 1200s
                   host_rewrite_literal: "api.anthropic.com"
               {% endfor %}
+              {% if models and models[0].path_prefix %}
+              # Preserve requests that already contain the backend path prefix.
+              # ExtProc may reselect the model after this initial route match.
+              - match:
+                  prefix: "{{ models[0].path_prefix }}"
+                route:
+                  cluster: {{ models[0].cluster_name }}_cluster
+                  timeout: {{ listener.timeout | default('1200s') }}
+                  idleTimeout: 1200s
+                  host_rewrite_literal: "{{ models[0].endpoints[0].address }}"
+              {% endif %}
               # Default route (no x-selected-model header)
               - match:
                   prefix: "/"
@@ -79,12 +106,15 @@ static_resources:
                   host_rewrite_literal: "{{ models[0].endpoints[0].address }}"
                   {% endif %}
                   {% if models and models[0].path_prefix %}
-                  # Prepend path prefix to all requests (e.g., /compatible-mode + /v1/chat/completions = /compatible-mode/v1/chat/completions)
+                  {% if models[0].path_prefix %}
+                  # Requests without the endpoint path are rewritten below; requests
+                  # that already have it match the route above.
                   regex_rewrite:
                     pattern:
                       google_re2: {}
                       regex: "^(.*)$"
                     substitution: "{{ models[0].path_prefix }}\\1"
+                  {% endif %}
                   {% endif %}
           http_filters:
           - name: envoy.filters.http.ext_proc

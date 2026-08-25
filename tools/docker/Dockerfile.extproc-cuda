@@ -168,11 +168,21 @@ RUN mkdir -p /app/lib && \
 # ============================================================================
 FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
 
-# Install runtime dependencies (pip is only used to obtain the ORT shared library)
+# Install runtime dependencies (pip is used for ORT and Envoy config generation).
 # curl is required by `vllm-sr serve` health checks (docker exec ... curl /health).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates openssl python3-pip curl && \
+    ca-certificates openssl python3-pip curl wget && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
+
+ENV ENVOY_VERSION=1.31.7
+RUN ARCH=$(uname -m) && \
+    case "${ARCH}" in \
+        x86_64) ENVOY_ARCH="x86_64" ;; \
+        *) echo "Unsupported architecture for Envoy: ${ARCH}" >&2; exit 1 ;; \
+    esac && \
+    wget -q "https://github.com/envoyproxy/envoy/releases/download/v${ENVOY_VERSION}/envoy-${ENVOY_VERSION}-linux-${ENVOY_ARCH}" \
+        -O /usr/local/bin/envoy && \
+    chmod +x /usr/local/bin/envoy
 
 # Install the CUDA-enabled ONNX Runtime wheel (ORT 1.22 series to match ort 2.0.0-rc.10 ABI)
 # Note: also install CLI extras explicitly (click/typer/rich) because the system
@@ -182,7 +192,11 @@ RUN pip3 install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple \
     'huggingface_hub[cli]==1.5.0' \
     click \
     typer \
-    rich && \
+    rich \
+    jinja2 \
+    pyyaml \
+    pydantic \
+    requests && \
     ORT_DIR=/usr/local/lib/python3.10/dist-packages/onnxruntime/capi && \
     ln -sf "$ORT_DIR"/libonnxruntime.so.* "$ORT_DIR/libonnxruntime.so" && \
     echo "=== Verifying CUDA ONNX Runtime library ===" && \
@@ -201,14 +215,16 @@ COPY --from=go-builder /app/bin/router-onnx /app/router-onnx
 COPY --from=go-builder /app/lib/ /app/lib/
 
 COPY config/config.yaml /app/config/
+COPY src/vllm-sr/cli/ /app/vllm-sr/cli/
 COPY scripts/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Point ort to the CUDA-enabled ORT library and set library paths
 ENV ORT_DYLIB_PATH=/usr/local/lib/python3.10/dist-packages/onnxruntime/capi/libonnxruntime.so \
     LD_LIBRARY_PATH=/app/lib:/usr/local/lib/python3.10/dist-packages/onnxruntime/capi:/usr/local/cuda/lib64 \
+    PYTHONPATH=/app/vllm-sr \
     AI_BINDING=onnx
 
-EXPOSE 50051
+EXPOSE 50051 8080 8899
 
 ENTRYPOINT ["/app/entrypoint.sh"]
