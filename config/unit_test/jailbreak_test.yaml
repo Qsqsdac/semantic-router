@@ -109,13 +109,24 @@ global:
         model_ref: prompt_guard
         model_id: models/mmbert32k-jailbreak-detector-merged
         threshold: 0.7
+        # Select one pipeline: l2, l0+l2, l1+l2, or l0+l1+l2.
+        mode: l1+l2
+        linear_fallback_threshold: 0.90
+
+        # More permissive L0 matching for lightly rewritten jailbreak templates.
+        min_hash_shingle_size: 2
+        min_hash_permutations: 32
+        min_hash_threshold: 0.95
+        minhash_model_path: models/jailbreak_minhash_patterns.json
+        regex_model_path: models/jailbreak_regex_rules.json
+        benign_model_path: models/jailbreak_benign_rules.json
         use_cpu: false
         use_modernbert: false
         use_mmbert_32k: true
-        early_exit_enabled: true
+        early_exit_enabled: false
         early_exit_layers: [4, 8, 12]
         early_exit_confidence: 0.8
-        prompt_crop_enabled: true
+        prompt_crop_enabled: false
         prompt_crop_max_chars: 1024
         prompt_crop_head_chars: 512
         prompt_crop_tail_chars: 512

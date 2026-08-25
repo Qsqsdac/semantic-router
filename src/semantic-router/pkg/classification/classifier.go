@@ -481,6 +481,9 @@ type Classifier struct {
 	intentFastTextClassifier    IntentFastTextClassifier
 	jailbreakInitializer        JailbreakInitializer
 	jailbreakInference          JailbreakInference
+	minHashJailbreakDetector    *MinHashJailbreakDetector
+	benignFastDetector          *BenignFastDetector
+	linearJailbreakDetector     *LinearJailbreakDetector
 	piiInitializer              PIIInitializer
 	piiInference                PIIInference
 	keywordClassifier           *KeywordClassifier
@@ -559,6 +562,14 @@ func withJailbreak(jailbreakMapping *JailbreakMapping, jailbreakInitializer Jail
 		c.JailbreakMapping = jailbreakMapping
 		c.jailbreakInitializer = jailbreakInitializer
 		c.jailbreakInference = jailbreakInference
+	}
+}
+
+func withJailbreakFastDetectors(minHash *MinHashJailbreakDetector, benign *BenignFastDetector, linear *LinearJailbreakDetector) option {
+	return func(c *Classifier) {
+		c.minHashJailbreakDetector = minHash
+		c.benignFastDetector = benign
+		c.linearJailbreakDetector = linear
 	}
 }
 
@@ -743,6 +754,45 @@ func NewClassifier(cfg *config.RouterConfig, categoryMapping *CategoryMapping, p
 		withJailbreak(jailbreakMapping, jailbreakInitializer, jailbreakInference),
 		withPII(piiMapping, piiInitializer, piiInference),
 	}
+
+	// Build optional CPU gates. Their misses deliberately fall through to L2.
+	var minHashDetector *MinHashJailbreakDetector
+	var benignFastDetector *BenignFastDetector
+	var linearDetector *LinearJailbreakDetector
+	if cfg.PromptGuard.UseL0() {
+		var patterns []string
+		for _, rule := range cfg.JailbreakRules {
+			patterns = append(patterns, rule.JailbreakPatterns...)
+		}
+		if cfg.PromptGuard.MinHashModelPath != "" {
+			modelPatterns, loadErr := LoadMinHashPatterns(config.ResolveModelPath(cfg.PromptGuard.MinHashModelPath))
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			patterns = append(patterns, modelPatterns...)
+		}
+		minHashDetector = NewMinHashJailbreakDetector(patterns, cfg.PromptGuard.MinHashShingleSize, cfg.PromptGuard.MinHashPermutations, cfg.PromptGuard.MinHashThreshold)
+		if cfg.PromptGuard.RegexModelPath != "" {
+			regexRules, loadErr := LoadJailbreakRegexRules(config.ResolveModelPath(cfg.PromptGuard.RegexModelPath))
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			minHashDetector.SetRegexRules(regexRules)
+		}
+	}
+	if cfg.PromptGuard.BenignModelPath != "" {
+		benignFastDetector, err = LoadBenignFastDetector(config.ResolveModelPath(cfg.PromptGuard.BenignModelPath))
+		if err != nil {
+			return nil, err
+		}
+	}
+	if cfg.PromptGuard.UseL1() {
+		linearDetector, err = NewLinearJailbreakDetector()
+		if err != nil {
+			return nil, err
+		}
+	}
+	options = append(options, withJailbreakFastDetectors(minHashDetector, benignFastDetector, linearDetector))
 
 	multiModalInitialized := false
 	initMultiModalIfNeeded := func(reason string) error {
@@ -1066,15 +1116,11 @@ func (c *Classifier) CheckForJailbreakWithThreshold(text string, threshold float
 		return false, "", 0.0, nil
 	}
 
-	// Use appropriate jailbreak classifier based on configuration
-	var result candle_binding.ClassResult
-	var err error
-
-	result, err = c.jailbreakInference.Classify(text)
+	result, source, err := c.classifyJailbreak(text)
 	if err != nil {
 		return false, "", 0.0, fmt.Errorf("jailbreak classification failed: %w", err)
 	}
-	logging.Infof("Jailbreak classification result: %v", result)
+	logging.Infof("Jailbreak classification result: %v (source=%s)", result, source)
 
 	// Get the jailbreak type name from the class index
 	jailbreakType, ok := c.JailbreakMapping.GetJailbreakTypeFromIndex(result.Class)
@@ -1094,6 +1140,68 @@ func (c *Classifier) CheckForJailbreakWithThreshold(text string, threshold float
 	}
 
 	return isJailbreak, jailbreakType, result.Confidence, nil
+}
+
+// classifyJailbreak applies the configured fast cascade before invoking L2.
+// Unsafe gates produce high-confidence jailbreak results, while the benign gate
+// only allows configured safe task shapes that pass its risk veto.
+func (c *Classifier) classifyJailbreak(text string) (candle_binding.ClassResult, string, error) {
+	if c.minHashJailbreakDetector != nil {
+		matched, score := c.minHashJailbreakDetector.Match(text)
+		if matched {
+			class, ok := c.JailbreakMapping.LabelToIdx["jailbreak"]
+			if !ok {
+				class, ok = c.JailbreakMapping.LabelToID["jailbreak"]
+			}
+			if !ok {
+				return candle_binding.ClassResult{}, "l0_minhash", fmt.Errorf("jailbreak label is missing from mapping")
+			}
+			logging.Infof("[Jailbreak Cascade] L0 MinHash matched (score=%.4f)", score)
+			return candle_binding.ClassResult{Class: class, Confidence: score}, "l0_minhash", nil
+		}
+		if c.minHashJailbreakDetector.MatchRegex(text) {
+			class, ok := c.JailbreakMapping.LabelToIdx["jailbreak"]
+			if !ok {
+				class, ok = c.JailbreakMapping.LabelToID["jailbreak"]
+			}
+			if !ok {
+				return candle_binding.ClassResult{}, "l0_regex", fmt.Errorf("jailbreak label is missing from mapping")
+			}
+			logging.Infof("[Jailbreak Cascade] L0 regex matched")
+			return candle_binding.ClassResult{Class: class, Confidence: 1}, "l0_regex", nil
+		}
+	}
+	if c.linearJailbreakDetector != nil {
+		decision, probability := c.linearJailbreakDetector.ClassifyWithConfidence(text, float64(c.Config.PromptGuard.LinearFallbackThreshold))
+		if decision != "" {
+			label := "benign"
+			if decision == "unsafe" {
+				label = "jailbreak"
+			}
+			class, ok := c.JailbreakMapping.LabelToIdx[label]
+			if !ok {
+				class, ok = c.JailbreakMapping.LabelToID[label]
+			}
+			if !ok {
+				return candle_binding.ClassResult{}, "l1_linear", fmt.Errorf("%s label is missing from mapping", label)
+			}
+			logging.Infof("[Jailbreak Cascade] L1 linear %s matched (confidence=%.4f)", decision, probability)
+			return candle_binding.ClassResult{Class: class, Confidence: probability}, "l1_linear", nil
+		}
+	}
+	if c.benignFastDetector != nil && c.benignFastDetector.Match(text) {
+		class, ok := c.JailbreakMapping.LabelToIdx["benign"]
+		if !ok {
+			class, ok = c.JailbreakMapping.LabelToID["benign"]
+		}
+		if !ok {
+			return candle_binding.ClassResult{}, "l0_benign_rule", fmt.Errorf("benign label is missing from mapping")
+		}
+		logging.Infof("[Jailbreak Cascade] L0 benign rule matched")
+		return candle_binding.ClassResult{Class: class, Confidence: 1}, "l0_benign_rule", nil
+	}
+	result, err := c.jailbreakInference.Classify(text)
+	return result, "l2_bert", err
 }
 
 // AnalyzeContentForJailbreak analyzes multiple content pieces for jailbreak attempts
@@ -2023,7 +2131,7 @@ func (c *Classifier) EvaluateAllSignalsWithContext(text string, contextText stri
 			// Step 2: Run classifier inference exactly once per unique content piece.
 			jailbreakCache := make(map[string]cachedJailbreakResult, len(classifierContents))
 			for _, content := range classifierContents {
-				result, err := c.jailbreakInference.Classify(content)
+				result, _, err := c.classifyJailbreak(content)
 				jailbreakCache[content] = cachedJailbreakResult{result, err}
 			}
 

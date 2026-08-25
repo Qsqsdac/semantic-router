@@ -8,11 +8,12 @@
 
 ## 运行方式
 
+脚本采用串行单请求模式，逐条发送请求以测量真实延迟（无并发）。
+
 ```bash
 python test/routerarena/routerarena_e2e_benchmark.py \
   --router-url http://localhost:9099 \
-  --splits full robustness \
-  --workers 8
+  --splits full robustness
 ```
 
 ## 指定样本量运行
@@ -28,8 +29,7 @@ python test/routerarena/routerarena_e2e_benchmark.py \
 python test/routerarena/routerarena_e2e_benchmark.py \
   --router-url http://localhost:9099 \
   --splits full robustness \
-  --max-samples 100 \
-  --workers 8
+  --max-samples 100
 ```
 
 示例 2：只跑 full，并限制为 200 条
@@ -38,8 +38,7 @@ python test/routerarena/routerarena_e2e_benchmark.py \
 python test/routerarena/routerarena_e2e_benchmark.py \
   --router-url http://localhost:9099 \
   --splits full \
-  --max-samples 200 \
-  --workers 8
+  --max-samples 200
 ```
 
 ## 输出指标

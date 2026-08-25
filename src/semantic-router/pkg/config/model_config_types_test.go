@@ -109,3 +109,32 @@ func TestFactCheckModelEffectiveModeFallsBackOnUnknownMode(t *testing.T) {
 		t.Fatalf("expected unknown fact-check mode to fallback to %q, got %q", FactCheckModeBERT, got)
 	}
 }
+
+func TestPromptGuardEffectiveModeDefaultsToBERT(t *testing.T) {
+	cfg := PromptGuardConfig{}
+	if got := cfg.EffectiveMode(); got != JailbreakModeL2 {
+		t.Fatalf("expected default jailbreak mode %q, got %q", JailbreakModeL2, got)
+	}
+}
+
+func TestPromptGuardEffectiveModeNormalizesPipelineCombinations(t *testing.T) {
+	for _, testCase := range []struct {
+		mode     string
+		expected string
+		usesL0   bool
+		usesL1   bool
+	}{
+		{mode: "L0_L2", expected: JailbreakModeL0L2, usesL0: true},
+		{mode: " l1+l2 ", expected: JailbreakModeL1L2, usesL1: true},
+		{mode: "L0+L1+L2", expected: JailbreakModeL0L1L2, usesL0: true, usesL1: true},
+		{mode: "unknown", expected: JailbreakModeL2},
+	} {
+		cfg := PromptGuardConfig{Mode: testCase.mode}
+		if got := cfg.EffectiveMode(); got != testCase.expected {
+			t.Fatalf("mode %q: expected %q, got %q", testCase.mode, testCase.expected, got)
+		}
+		if cfg.UseL0() != testCase.usesL0 || cfg.UseL1() != testCase.usesL1 {
+			t.Fatalf("mode %q: UseL0=%t UseL1=%t", testCase.mode, cfg.UseL0(), cfg.UseL1())
+		}
+	}
+}

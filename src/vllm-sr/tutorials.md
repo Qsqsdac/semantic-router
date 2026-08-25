@@ -33,7 +33,7 @@ python ../../scripts/eval_intent_api.py --router-url http://localhost:8280
 curl -X POST http://localhost:8280/api/v1/classify/security   -H "Content-Type: application/json"   -d '{"text": "what is cad?"}'
 
 ## 脚本
-python ../../scripts/eval_jailbreak_api.py --router-url http://localhost:8280 --max-samples 1000 --workers 4
+python ../../scripts/eval_jailbreak_api.py --router-url http://localhost:8280
 
 # 事实核查测试
 
@@ -44,7 +44,7 @@ python ../../scripts/eval_jailbreak_api.py --router-url http://localhost:8280 --
 curl -X POST http://localhost:8280/api/v1/classify/fact-check   -H "Content-Type: application/json"   -d '{"text": "Who is the first president of America?"}'
 
 ## 脚本
-python ../../scripts/eval_fact_check_api.py --router-url http://localhost:8280 --max-samples 1000 --workers 4
+python ../../scripts/eval_fact_check_api.py --router-url http://localhost:8280 --max-samples 1000
 
 # complexity 测试
 
@@ -55,7 +55,7 @@ python ../../scripts/eval_fact_check_api.py --router-url http://localhost:8280 -
 curl -X POST http://localhost:8280/api/v1/classify/complexity   -H "Content-Type: application/json"   -d '{"text": "Explain the tradeoffs in consensus algorithms."}'
 
 ## 脚本
-python ../../scripts/eval_complexity_api.py --router-url http://localhost:8280 --max-samples 1000 --workers 4
+python ../../scripts/eval_complexity_api.py --router-url http://localhost:8280 --max-samples 1000
 
 # 端到端测试
 

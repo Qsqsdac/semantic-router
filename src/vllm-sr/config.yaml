@@ -47,27 +47,40 @@ routing:
       description: "Fast default text model"
       capabilities: ["chat", "reasoning"]
     - name: "MoM-large"
-      description: "Higher quality model for requests that need fact check"
+      description: "Higher quality model for complex reasoning requests"
       capabilities: ["chat", "reasoning", "long-context"]
 
-  # Fact-check unit test setup: keep only fact_check signal.
   signals:
-    fact_check:
-      - name: "needs_fact_check"
-        description: "Prompts with factual claims that should be verified."
-      - name: "no_fact_check_needed"
-        description: "Creative prompts that do not need factual verification."
+    complexity:
+      - name: "needs_reasoning"
+        threshold: 0.25
+        match_mode: emb
+        keyword_mapping_path: complexity-assets/keyword_map.json
+        description: "Escalate multi-step reasoning or synthesis-heavy prompts."
+        hard:
+          candidates:
+            - solve this step by step
+            - compare multiple tradeoffs
+            - analyze the root cause
+            - write a detailed story with vivid descriptions and character development
+            - provide a comprehensive analysis with supporting examples
+        easy:
+          candidates:
+            - answer briefly
+            - quick summary
+            - simple rewrite
+            - paraphrase this sentence
+            - summarize this passage in one sentence
 
-  # Fact-check-focused route set: one explicit route and one fallback.
   decisions:
-    - name: "fact_check_route"
-      description: "Requests needing fact-check route to stronger model."
+    - name: "complexity_route"
+      description: "Requests needing reasoning route to the stronger model."
       priority: 200
       rules:
         operator: AND
         conditions:
-          - type: fact_check
-            name: "needs_fact_check"
+          - type: complexity
+            name: "needs_reasoning"
       modelRefs:
         - model: MoM-large
           use_reasoning: true
@@ -75,7 +88,7 @@ routing:
         type: static
 
     - name: "default_route"
-      description: "Fallback for prompts not requiring fact-check."
+      description: "Fallback for prompts not requiring complexity escalation."
       priority: 100
       rules:
         operator: AND
@@ -88,17 +101,22 @@ routing:
 
 global:
   model_catalog:
-    modules:
-      hallucination_mitigation:
-        enabled: true
-        fact_check:
-          model_ref: fact_check_classifier
-          model_id: models/mmbert32k-factcheck-classifier-merged
-          mode: svm_only
-          threshold: 0.65
-          svm_fallback_threshold: 0.7
-          use_cpu: false
-          use_mmbert_32k: true
+    embeddings:
+      semantic:
+        qwen3_model_path: models/mom-embedding-pro
+        gemma_model_path: models/mom-embedding-flash
+        mmbert_model_path: models/mom-embedding-ultra
+        multimodal_model_path: models/mom-embedding-multimodal
+        bert_model_path: models/mom-embedding-light
+        use_cpu: false
+        embedding_config:
+          model_type: mmbert
+          preload_embeddings: true
+          target_dimension: 768
+          target_layer: 22
+          enable_soft_matching: true
+          top_k: 1
+          min_score_threshold: 0.45
   stores:
     semantic_cache:
       enabled: false

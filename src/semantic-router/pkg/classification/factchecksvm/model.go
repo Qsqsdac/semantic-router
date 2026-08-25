@@ -4,6 +4,8 @@ package factchecksvm
 import (
 	"strings"
 	"unicode"
+
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/classification/lineartoken"
 )
 
 const NegativeLabel = "needs_fact_check"
@@ -1292,6 +1294,18 @@ var modelWeights = []float64{
 }
 
 var modelIntercept = 0.70881988398219709
+
+// Model exposes the generated assets to the shared linear token runtime.
+func Model() lineartoken.Model {
+	return lineartoken.Model{
+		ModelType:     "countvectorizer_binary_unigram_linear_svc",
+		Tokens:        modelTokens,
+		Weights:       modelWeights,
+		Intercept:     modelIntercept,
+		NegativeLabel: NegativeLabel,
+		PositiveLabel: PositiveLabel,
+	}
+}
 
 type acNode struct {
 	next map[rune]int

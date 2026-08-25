@@ -11,6 +11,11 @@ const (
 	FactCheckModeBERT            = "bert"
 	FactCheckModeSVMOnly         = "svm_only"
 	FactCheckModeSVMFallbackBERT = "svm_fallback_bert"
+
+	JailbreakModeL2     = "l2"
+	JailbreakModeL0L2   = "l0+l2"
+	JailbreakModeL1L2   = "l1+l2"
+	JailbreakModeL0L1L2 = "l0+l1+l2"
 )
 
 // Classifier represents the configuration for text classification.
@@ -173,21 +178,52 @@ func (pc PromptCompressionConfig) SkipSignalsSet() map[string]bool {
 }
 
 type PromptGuardConfig struct {
-	Enabled              bool    `yaml:"enabled"`
-	ModelID              string  `yaml:"model_id"`
-	Threshold            float32 `yaml:"threshold"`
-	UseCPU               bool    `yaml:"use_cpu"`
-	UseModernBERT        bool    `yaml:"use_modernbert"`
-	UseMmBERT32K         bool    `yaml:"use_mmbert_32k"`
-	EarlyExitEnabled     bool    `yaml:"early_exit_enabled,omitempty"`
-	EarlyExitLayers      []int   `yaml:"early_exit_layers,omitempty"`
-	EarlyExitConfidence  float32 `yaml:"early_exit_confidence,omitempty"`
-	PromptCropEnabled    bool    `yaml:"prompt_crop_enabled,omitempty"`
-	PromptCropMaxChars   int     `yaml:"prompt_crop_max_chars,omitempty"`
-	PromptCropHeadChars  int     `yaml:"prompt_crop_head_chars,omitempty"`
-	PromptCropTailChars  int     `yaml:"prompt_crop_tail_chars,omitempty"`
-	JailbreakMappingPath string  `yaml:"jailbreak_mapping_path"`
-	UseVLLM              bool    `yaml:"use_vllm,omitempty"`
+	Enabled                 bool    `yaml:"enabled"`
+	ModelID                 string  `yaml:"model_id"`
+	Threshold               float32 `yaml:"threshold"`
+	MinHashModelPath        string  `yaml:"minhash_model_path,omitempty"`
+	MinHashShingleSize      int     `yaml:"minhash_shingle_size,omitempty"`
+	MinHashPermutations     int     `yaml:"minhash_permutations,omitempty"`
+	MinHashThreshold        float32 `yaml:"minhash_threshold,omitempty"`
+	RegexModelPath          string  `yaml:"regex_model_path,omitempty"`
+	BenignModelPath         string  `yaml:"benign_model_path,omitempty"`
+	Mode                    string  `yaml:"mode,omitempty"`
+	LinearFallbackThreshold float32 `yaml:"linear_fallback_threshold,omitempty"`
+	UseCPU                  bool    `yaml:"use_cpu"`
+	UseModernBERT           bool    `yaml:"use_modernbert"`
+	UseMmBERT32K            bool    `yaml:"use_mmbert_32k"`
+	EarlyExitEnabled        bool    `yaml:"early_exit_enabled,omitempty"`
+	EarlyExitLayers         []int   `yaml:"early_exit_layers,omitempty"`
+	EarlyExitConfidence     float32 `yaml:"early_exit_confidence,omitempty"`
+	PromptCropEnabled       bool    `yaml:"prompt_crop_enabled,omitempty"`
+	PromptCropMaxChars      int     `yaml:"prompt_crop_max_chars,omitempty"`
+	PromptCropHeadChars     int     `yaml:"prompt_crop_head_chars,omitempty"`
+	PromptCropTailChars     int     `yaml:"prompt_crop_tail_chars,omitempty"`
+	JailbreakMappingPath    string  `yaml:"jailbreak_mapping_path"`
+	UseVLLM                 bool    `yaml:"use_vllm,omitempty"`
+}
+
+func (m PromptGuardConfig) EffectiveMode() string {
+	switch strings.ReplaceAll(strings.ToLower(strings.TrimSpace(m.Mode)), "_", "+") {
+	case JailbreakModeL0L2:
+		return JailbreakModeL0L2
+	case JailbreakModeL1L2:
+		return JailbreakModeL1L2
+	case JailbreakModeL0L1L2:
+		return JailbreakModeL0L1L2
+	default:
+		return JailbreakModeL2
+	}
+}
+
+func (m PromptGuardConfig) UseL0() bool {
+	mode := m.EffectiveMode()
+	return mode == JailbreakModeL0L2 || mode == JailbreakModeL0L1L2
+}
+
+func (m PromptGuardConfig) UseL1() bool {
+	mode := m.EffectiveMode()
+	return mode == JailbreakModeL1L2 || mode == JailbreakModeL0L1L2
 }
 
 type FeedbackDetectorConfig struct {

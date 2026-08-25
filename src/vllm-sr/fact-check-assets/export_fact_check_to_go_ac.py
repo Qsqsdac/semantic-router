@@ -133,11 +133,22 @@ def generate_go_source(
 package {package_name}
 
 import (
+    "github.com/vllm-project/semantic-router/src/semantic-router/pkg/classification/lineartoken"
 \t"strings"
 \t"unicode"
 )
 
 const NegativeLabel = {go_quote(negative_label)}
+
+func Model() lineartoken.Model {{
+    return lineartoken.Model{{
+        Tokens:        modelTokens,
+        Weights:       modelWeights,
+        Intercept:     modelIntercept,
+        NegativeLabel: NegativeLabel,
+        PositiveLabel: PositiveLabel,
+    }}
+}}
 const PositiveLabel = {go_quote(positive_label)}
 
 var modelTokens = []string{{

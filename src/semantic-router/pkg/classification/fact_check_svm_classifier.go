@@ -6,13 +6,20 @@ import (
 	"strings"
 
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/classification/factchecksvm"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/classification/lineartoken"
 )
 
 // FactCheckSVMClassifier runs AC + linear SVM inference in pure Go.
-type FactCheckSVMClassifier struct{}
+type FactCheckSVMClassifier struct {
+	classifier *lineartoken.Classifier
+}
 
 func NewFactCheckSVMClassifier() (*FactCheckSVMClassifier, error) {
-	return &FactCheckSVMClassifier{}, nil
+	classifier, err := lineartoken.New(factchecksvm.Model())
+	if err != nil {
+		return nil, fmt.Errorf("initialize fact-check linear token model: %w", err)
+	}
+	return &FactCheckSVMClassifier{classifier: classifier}, nil
 }
 
 func (c *FactCheckSVMClassifier) Classify(text string) (*FactCheckResult, error) {
@@ -20,19 +27,22 @@ func (c *FactCheckSVMClassifier) Classify(text string) (*FactCheckResult, error)
 		return nil, fmt.Errorf("svm classifier is nil")
 	}
 
-	label, needsFactCheck, score := factchecksvm.Predict(text)
+	label, positive, probability := c.classifier.Predict(text)
+	needsFactCheck := label == "needs_fact_check"
 	resolvedLabel, resolvedNeed := normalizeFactCheckLabel(label, needsFactCheck)
 
 	return &FactCheckResult{
 		NeedsFactCheck: resolvedNeed,
-		Confidence:     marginToConfidence(score),
+		Confidence:     probabilityToConfidence(positive, probability),
 		Label:          resolvedLabel,
 	}, nil
 }
 
-func marginToConfidence(score float64) float32 {
-	margin := math.Abs(score)
-	return float32(1.0 / (1.0 + math.Exp(-margin)))
+func probabilityToConfidence(positive bool, probability float64) float32 {
+	if !positive {
+		probability = 1 - probability
+	}
+	return float32(math.Max(probability, 1-probability))
 }
 
 func normalizeFactCheckLabel(label string, needsFactCheck bool) (string, bool) {
