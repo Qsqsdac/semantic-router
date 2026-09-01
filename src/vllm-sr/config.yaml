@@ -17,9 +17,10 @@ providers:
         vllm: Qwen/Qwen3.5-4B
       backend_refs:
         - name: "primary"
+          endpoint: "10.156.186.8:18081"
           protocol: "http"
           type: "openai"
-          base_url: "https://api.siliconflow.cn/v1"
+          base_url: "http://10.156.186.8:18081/v1"
           provider: "openai"
           chat_path: /chat/completions
           auth_header: "Authorization"
@@ -37,9 +38,10 @@ providers:
         vllm: Qwen/Qwen3.5-27B
       backend_refs:
         - name: "primary"
+          endpoint: "10.156.186.8:18081"
           protocol: "http"
           type: "openai"
-          base_url: "https://api.siliconflow.cn/v1"
+          base_url: "http://10.156.186.8:18081/v1"
           provider: "openai"
           chat_path: /chat/completions
           auth_header: "Authorization"
@@ -174,7 +176,7 @@ routing:
     complexity:
       - name: "needs_reasoning"
         threshold: 0.25
-        match_mode: keyword_fallback_emb     # *complexity: keyword_fallback_emb
+        match_mode: emb     # *complexity: keyword_fallback_emb
         keyword_mapping_path: complexity-assets/keyword_map.json
         description: "Escalate multi-step reasoning or synthesis-heavy prompts."
         hard:
@@ -453,7 +455,7 @@ global:
         use_cpu: false
         use_modernbert: false
         use_mmbert_32k: true
-        mode: l1+l2     # *jailbreak
+        mode: l2     # *jailbreak
         linear_fallback_threshold: 0.90
         min_hash_shingle_size: 2
         min_hash_permutations: 32
@@ -470,7 +472,7 @@ global:
         skip_signals: [jailbreak]
       classifier:
         domain:
-          intent_match_mode: fasttext_fallback_bert  # *intent: fasttext_fallback_bert / fasttext_only
+          intent_match_mode: bert  # *intent: fasttext_fallback_bert / fasttext_only
           intent_keyword_mapping_path: /app/intent-assets/intent_keyword_mapping.json
           intent_keyword_case_sensitive: false
           intent_fasttext_model_path: /app/intent-assets/models/intent_fasttext.bin
@@ -482,7 +484,7 @@ global:
         fact_check:
           model_ref: fact_check_classifier
           model_id: models/mmbert32k-factcheck-classifier-merged
-          mode: svm_only   # *fact_check: svm_only
+          mode: bert   # *fact_check: svm_only
           threshold: 0.65
           svm_fallback_threshold: 0.7
           use_cpu: false

@@ -101,3 +101,28 @@ python ../../test/routerarena/routerarena_e2e_benchmark_chunked.py --slice-index
 ```bash
 python ../../test/routerarena/routerarena_e2e_benchmark.py --max-samples=100
 ```
+
+## RouterArena 后端结果回放
+
+重复路由实验可将上游 OpenAI 兼容后端替换为本地录制/回放服务。缓存键包含路由器转发后的完整请求体（含上游物理模型 ID）；因此只有相同请求且路由选择相同模型时才会命中。命中响应会返回 `X-OpenAI-Replay: HIT`，并跳过真实模型调用；未命中项在 `auto` 模式下回源并录制。
+
+基准脚本会将命中的历史回答耗时写回 `http_elapsed_ms`，并将本次快速回放的实际耗时另存为 `actual_http_elapsed_ms`。正确性仍由原回答重新评分，路由延迟仍来自路由器的 `x-vsr-total-routing-latency-ms` 响应头。
+
+先导入已有 RouterArena 运行的成功记录：
+
+```bash
+python scripts/openai_record_replay_backend.py \
+	--cache-dir .cache/routerarena-replay \
+	--import-routerarena-detail reports/routerarena-e2e/routerarena_e2e_full_detail_20260825-124128.jsonl
+```
+
+启动服务。`REPLAY_UPSTREAM_BASE_URL` 应指向原真实后端的 `/v1` 地址；仅在缓存未命中时使用：
+
+```bash
+REPLAY_CACHE_DIR=.cache/routerarena-replay \
+REPLAY_UPSTREAM_BASE_URL=https://api.siliconflow.cn/v1 \
+REPLAY_UPSTREAM_API_KEY="$OPENAI_API_KEY" \
+python scripts/openai_record_replay_backend.py --mode auto
+```
+
+将运行中的路由配置中两个 `backend_refs[].base_url` 都改为此服务的 `/v1` 地址，例如 `http://10.156.186.8:18081/v1`，再重启路由服务。容器必须可访问该主机地址。仅验证缓存覆盖率时可使用 `--mode replay`，它会对未命中项返回 HTTP 404 而不会调用上游。

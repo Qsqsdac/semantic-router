@@ -36,6 +36,7 @@ ROUTERARENA_CONFIG_DIR = ROUTERARENA_ROOT / "config" / "eval_config" / "zero-sho
 DEFAULT_DATASET = "RouteWorks/RouterArena"
 DEFAULT_ENDPOINT = "/v1/chat/completions"
 LATENCY_HEADER = "x-vsr-total-routing-latency-ms"
+REPLAY_ORIGINAL_ELAPSED_HEADER = "x-openai-replay-original-elapsed-ms"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "reports" / "routerarena-e2e"
 DEFAULT_SPLITS = ["full"]
 DEFAULT_AUTH_TOKEN = "sk-123456"
@@ -633,6 +634,12 @@ def parse_response_metadata(response: requests.Response) -> Dict[str, Any]:
     except (TypeError, ValueError):
         routing_latency_ms = None
 
+    replay_elapsed_raw = response.headers.get(REPLAY_ORIGINAL_ELAPSED_HEADER)
+    try:
+        replay_original_elapsed_ms = float(replay_elapsed_raw) if replay_elapsed_raw is not None else None
+    except (TypeError, ValueError):
+        replay_original_elapsed_ms = None
+
     completion_tokens: Optional[int] = None
     if isinstance(payload, dict) and "usage" in payload:
         usage = payload["usage"]
@@ -649,6 +656,7 @@ def parse_response_metadata(response: requests.Response) -> Dict[str, Any]:
         "response_text": response_text,
         "selected_model": selected_model,
         "routing_latency_ms": routing_latency_ms,
+        "replay_original_elapsed_ms": replay_original_elapsed_ms,
         "completion_tokens": completion_tokens,
     }
 
@@ -771,7 +779,8 @@ def evaluate_one(
                 "response_text": parsed["response_text"],
                 "routing_latency_ms": parsed["routing_latency_ms"],
                 "completion_tokens": parsed["completion_tokens"],
-                "http_elapsed_ms": total_http_elapsed_ms,
+                "http_elapsed_ms": parsed["replay_original_elapsed_ms"] or total_http_elapsed_ms,
+                "actual_http_elapsed_ms": total_http_elapsed_ms,
                 "task_score": task_score,
                 "is_supported": is_supported,
                 "raw_response": parsed["raw_response"],
@@ -789,6 +798,7 @@ def evaluate_one(
                 "routing_latency_ms": None,
                 "completion_tokens": None,
                 "http_elapsed_ms": (time.perf_counter() - started) * 1000.0,
+                "actual_http_elapsed_ms": None,
                 "task_score": None,
                 "is_supported": False,
                 "raw_response": None,

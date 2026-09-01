@@ -453,7 +453,7 @@ global:
         use_cpu: false
         use_modernbert: false
         use_mmbert_32k: true
-        mode: l1+l2     # *jailbreak
+        mode: l0+l1+l2     # *jailbreak
         linear_fallback_threshold: 0.90
         min_hash_shingle_size: 2
         min_hash_permutations: 32
