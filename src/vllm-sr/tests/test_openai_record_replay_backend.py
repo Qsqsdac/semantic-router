@@ -35,6 +35,51 @@ def test_router_rewritten_chat_path_is_supported():
     assert "/v1/chat/completions" in replay.CHAT_COMPLETION_PATHS
 
 
+def test_upstream_session_ignores_environment_proxy_settings(monkeypatch):
+    for name in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ):
+        monkeypatch.setenv(name, "http://proxy.invalid:8080")
+
+    session = replay.new_upstream_session()
+    try:
+        assert session.trust_env is False
+        settings = session.merge_environment_settings(
+            "https://upstream.invalid/chat/completions",
+            proxies=None,
+            stream=False,
+            verify=True,
+            cert=None,
+        )
+        assert settings["proxies"] == {}
+    finally:
+        session.close()
+
+
+def test_explicit_upstream_proxy_remains_opt_in(tmp_path):
+    server = replay.ReplayHTTPServer(
+        ("127.0.0.1", 0),
+        replay.ReplayStore(tmp_path),
+        "auto",
+        "https://upstream.invalid/v1",
+        "",
+        10,
+        "http://proxy.example:8080",
+    )
+    try:
+        assert server.proxies == {
+            "http": "http://proxy.example:8080",
+            "https": "http://proxy.example:8080",
+        }
+    finally:
+        server.server_close()
+
+
 def test_import_routerarena_detail_uses_prompt_and_selected_model(tmp_path):
     detail = tmp_path / "detail.jsonl"
     detail.write_text(

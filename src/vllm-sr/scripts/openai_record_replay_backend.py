@@ -70,6 +70,18 @@ def response_record(response: requests.Response, elapsed_ms: float) -> dict[str,
     }
 
 
+def new_upstream_session() -> requests.Session:
+    """Create an upstream client that does not inherit proxy settings from the environment.
+
+    ``requests`` reads HTTP(S)_PROXY and ALL_PROXY by default.  The replay
+    service must be usable with the same direct upstream configuration as the
+    router, so proxying is opt-in through ``REPLAY_UPSTREAM_PROXY`` instead.
+    """
+    session = requests.Session()
+    session.trust_env = False
+    return session
+
+
 def import_routerarena_detail(store: ReplayStore, detail_file: Path, reasoning_effort: str) -> tuple[int, int]:
     imported = 0
     skipped = 0
@@ -147,13 +159,14 @@ class ReplayHandler(BaseHTTPRequestHandler):
         if self.server.upstream_api_key:
             headers["Authorization"] = f"Bearer {self.server.upstream_api_key}"
         started = time.perf_counter()
-        response = requests.post(
-            f"{self.server.upstream_base}/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=self.server.upstream_timeout,
-            proxies=self.server.proxies,
-        )
+        with new_upstream_session() as session:
+            response = session.post(
+                f"{self.server.upstream_base}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=self.server.upstream_timeout,
+                proxies=self.server.proxies,
+            )
         return response, (time.perf_counter() - started) * 1000.0
 
     def do_GET(self) -> None:  # noqa: N802
