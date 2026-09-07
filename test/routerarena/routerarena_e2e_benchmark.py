@@ -37,6 +37,12 @@ DEFAULT_DATASET = "RouteWorks/RouterArena"
 DEFAULT_ENDPOINT = "/v1/chat/completions"
 LATENCY_HEADER = "x-vsr-total-routing-latency-ms"
 REPLAY_ORIGINAL_ELAPSED_HEADER = "x-openai-replay-original-elapsed-ms"
+SIGNAL_LATENCY_HEADERS = {
+    "jailbreak": "x-vsr-signal-jailbreak-latency-ms",
+    "complexity": "x-vsr-signal-complexity-latency-ms",
+    "domain": "x-vsr-signal-domain-latency-ms",
+    "fact_check": "x-vsr-signal-fact-check-latency-ms",
+}
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "reports" / "routerarena-e2e"
 DEFAULT_SPLITS = ["full"]
 DEFAULT_AUTH_TOKEN = "sk-123456"
@@ -634,6 +640,14 @@ def parse_response_metadata(response: requests.Response) -> Dict[str, Any]:
     except (TypeError, ValueError):
         routing_latency_ms = None
 
+    signal_latency_ms: Dict[str, float] = {}
+    for signal_name, header_name in SIGNAL_LATENCY_HEADERS.items():
+        try:
+            latency = float(response.headers[header_name])
+        except (KeyError, TypeError, ValueError):
+            continue
+        signal_latency_ms[signal_name] = latency
+
     replay_elapsed_raw = response.headers.get(REPLAY_ORIGINAL_ELAPSED_HEADER)
     try:
         replay_original_elapsed_ms = float(replay_elapsed_raw) if replay_elapsed_raw is not None else None
@@ -656,6 +670,7 @@ def parse_response_metadata(response: requests.Response) -> Dict[str, Any]:
         "response_text": response_text,
         "selected_model": selected_model,
         "routing_latency_ms": routing_latency_ms,
+        "signal_latency_ms": signal_latency_ms,
         "replay_original_elapsed_ms": replay_original_elapsed_ms,
         "completion_tokens": completion_tokens,
     }
@@ -778,6 +793,7 @@ def evaluate_one(
                 "selected_model": parsed["selected_model"],
                 "response_text": parsed["response_text"],
                 "routing_latency_ms": parsed["routing_latency_ms"],
+                "signal_latency_ms": parsed["signal_latency_ms"],
                 "completion_tokens": parsed["completion_tokens"],
                 "http_elapsed_ms": parsed["replay_original_elapsed_ms"] or total_http_elapsed_ms,
                 "actual_http_elapsed_ms": total_http_elapsed_ms,

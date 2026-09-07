@@ -8,6 +8,7 @@ import (
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	ext_proc "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/classification"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/headers"
 )
 
@@ -92,6 +93,7 @@ func buildResponseHeaderMutation(
 	builder.addString(headers.VSRSelectedReasoning, ctx.VSRReasoningMode)
 	builder.addString(headers.VSRSelectedModel, ctx.VSRSelectedModel)
 	builder.addInt(headers.VSRTotalRoutingLatencyMs, ctx.VSRTotalRoutingLatencyMs)
+	appendSignalLatencyHeaders(builder, ctx.VSRSignalMetrics)
 	builder.addBool(headers.VSRInjectedSystemPrompt, ctx.VSRInjectedSystemPrompt)
 	builder.addJoined(headers.VSRMatchedKeywords, ctx.VSRMatchedKeywords)
 	builder.addJoined(headers.VSRMatchedEmbeddings, ctx.VSRMatchedEmbeddings)
@@ -108,4 +110,31 @@ func buildResponseHeaderMutation(
 	builder.addJoined(headers.VSRMatchedPII, ctx.VSRMatchedPII)
 	builder.addString(headers.RouterReplayID, ctx.RouterReplayID)
 	return builder.mutation()
+}
+
+func appendSignalLatencyHeaders(builder *responseHeaderMutationBuilder, signalMetrics *classification.SignalMetricsCollection) {
+	if signalMetrics == nil {
+		return
+	}
+
+	for _, signal := range []struct {
+		name  string
+		value float64
+	}{
+		{"keyword", signalMetrics.Keyword.ExecutionTimeMs},
+		{"embedding", signalMetrics.Embedding.ExecutionTimeMs},
+		{"domain", signalMetrics.Domain.ExecutionTimeMs},
+		{"fact-check", signalMetrics.FactCheck.ExecutionTimeMs},
+		{"user-feedback", signalMetrics.UserFeedback.ExecutionTimeMs},
+		{"preference", signalMetrics.Preference.ExecutionTimeMs},
+		{"language", signalMetrics.Language.ExecutionTimeMs},
+		{"context", signalMetrics.Context.ExecutionTimeMs},
+		{"complexity", signalMetrics.Complexity.ExecutionTimeMs},
+		{"modality", signalMetrics.Modality.ExecutionTimeMs},
+		{"authz", signalMetrics.Authz.ExecutionTimeMs},
+		{"jailbreak", signalMetrics.Jailbreak.ExecutionTimeMs},
+		{"pii", signalMetrics.PII.ExecutionTimeMs},
+	} {
+		builder.addFloat(headers.VSRSignalLatencyPrefix+signal.name+headers.VSRSignalLatencySuffix, signal.value)
+	}
 }

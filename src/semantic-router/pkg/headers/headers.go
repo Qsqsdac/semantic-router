@@ -55,6 +55,11 @@ const (
 	// Value: positive integer milliseconds (e.g., "12")
 	VSRTotalRoutingLatencyMs = "x-vsr-total-routing-latency-ms"
 
+	// VSRSignalLatencyPrefix prefixes diagnostic per-signal execution latency headers.
+	// Header names use the form x-vsr-signal-<signal>-latency-ms.
+	VSRSignalLatencyPrefix = "x-vsr-signal-"
+	VSRSignalLatencySuffix = "-latency-ms"
+
 	// VSRInjectedSystemPrompt indicates whether a system prompt was injected into the request.
 	// Values: "true" or "false"
 	VSRInjectedSystemPrompt = "x-vsr-injected-system-prompt"

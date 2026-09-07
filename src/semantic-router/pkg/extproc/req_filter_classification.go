@@ -120,6 +120,7 @@ func (r *OpenAIRouter) performDecisionEvaluation(originalModel string, userConte
 	ctx.VSRMatchedAuthz = signals.MatchedAuthzRules
 	ctx.VSRMatchedJailbreak = signals.MatchedJailbreakRules
 	ctx.VSRMatchedPII = signals.MatchedPIIRules
+	ctx.VSRSignalMetrics = signals.Metrics
 
 	// Store jailbreak/PII detection metadata from signal results
 	if signals.JailbreakDetected {

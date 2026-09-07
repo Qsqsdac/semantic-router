@@ -6,6 +6,7 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/classification"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/ratelimit"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/routerreplay"
@@ -59,16 +60,17 @@ type RequestContext struct {
 	TTFTSeconds  float64
 
 	// VSR decision tracking
-	VSRSelectedCategory           string           // The category from domain classification (MMLU category)
-	VSRSelectedDecisionName       string           // The decision name from DecisionEngine evaluation
-	VSRSelectedDecisionConfidence float64          // Confidence score from DecisionEngine evaluation
-	VSRReasoningMode              string           // "on" or "off" - whether reasoning mode was determined to be used
-	VSRSelectedModel              string           // The model selected by VSR
-	VSRSelectionMethod            string           // Model selection algorithm used (e.g., "elo", "static", "router_dc")
-	VSRTotalRoutingLatencyMs      int              // Routing-stage latency until decision/cache completes and request is ready to forward (milliseconds)
-	VSRCacheHit                   bool             // Whether this request hit the cache
-	VSRInjectedSystemPrompt       bool             // Whether a system prompt was injected into the request
-	VSRSelectedDecision           *config.Decision // The decision object selected by DecisionEngine (for plugins)
+	VSRSelectedCategory           string                                  // The category from domain classification (MMLU category)
+	VSRSelectedDecisionName       string                                  // The decision name from DecisionEngine evaluation
+	VSRSelectedDecisionConfidence float64                                 // Confidence score from DecisionEngine evaluation
+	VSRReasoningMode              string                                  // "on" or "off" - whether reasoning mode was determined to be used
+	VSRSelectedModel              string                                  // The model selected by VSR
+	VSRSelectionMethod            string                                  // Model selection algorithm used (e.g., "elo", "static", "router_dc")
+	VSRTotalRoutingLatencyMs      int                                     // Routing-stage latency until decision/cache completes and request is ready to forward (milliseconds)
+	VSRSignalMetrics              *classification.SignalMetricsCollection // Per-signal execution metrics collected during routing
+	VSRCacheHit                   bool                                    // Whether this request hit the cache
+	VSRInjectedSystemPrompt       bool                                    // Whether a system prompt was injected into the request
+	VSRSelectedDecision           *config.Decision                        // The decision object selected by DecisionEngine (for plugins)
 
 	// Modality routing classification result (AR/DIFFUSION/BOTH)
 	ModalityClassification *ModalityClassificationResult // Set by classifyModality()

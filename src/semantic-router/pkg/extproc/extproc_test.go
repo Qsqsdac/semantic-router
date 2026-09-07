@@ -2284,10 +2284,14 @@ func TestVSRHeadersAddedOnSuccessfulNonCachedResponse(t *testing.T) {
 
 	// Create request context with VSR decision information
 	ctx := &RequestContext{
-		VSRSelectedCategory:     "math",
-		VSRReasoningMode:        "on",
-		VSRSelectedModel:        "deepseek-v31",
+		VSRSelectedCategory:      "math",
+		VSRReasoningMode:         "on",
+		VSRSelectedModel:         "deepseek-v31",
 		VSRTotalRoutingLatencyMs: 42,
+		VSRSignalMetrics: &classification.SignalMetricsCollection{
+			Jailbreak:  classification.SignalMetrics{ExecutionTimeMs: 12.5},
+			Complexity: classification.SignalMetrics{ExecutionTimeMs: 7.25},
+		},
 		VSRCacheHit:             false, // Not a cache hit
 		VSRInjectedSystemPrompt: true,  // System prompt was injected
 	}
@@ -2320,7 +2324,7 @@ func TestVSRHeadersAddedOnSuccessfulNonCachedResponse(t *testing.T) {
 	assert.NotNil(t, headerMutation, "HeaderMutation should not be nil for successful non-cached response")
 
 	setHeaders := headerMutation.GetSetHeaders()
-	assert.Len(t, setHeaders, 6, "Should have 6 VSR headers")
+	assert.Len(t, setHeaders, 7, "Should have 7 VSR headers")
 
 	// Verify each header
 	headerMap := make(map[string]string)
@@ -2332,6 +2336,8 @@ func TestVSRHeadersAddedOnSuccessfulNonCachedResponse(t *testing.T) {
 	assert.Equal(t, "on", headerMap["x-vsr-selected-reasoning"])
 	assert.Equal(t, "deepseek-v31", headerMap["x-vsr-selected-model"])
 	assert.Equal(t, "42", headerMap["x-vsr-total-routing-latency-ms"])
+	assert.Equal(t, "12.5000", headerMap["x-vsr-signal-jailbreak-latency-ms"])
+	assert.Equal(t, "7.2500", headerMap["x-vsr-signal-complexity-latency-ms"])
 	assert.Equal(t, "true", headerMap["x-vsr-injected-system-prompt"])
 }
 
