@@ -1,0 +1,22 @@
+# RouteLLM router configuration. The route model pair is kept separate from
+# the actual backend pair because MF's published checkpoint uses these model IDs.
+mf:
+  checkpoint_path: routellm/mf_gpt4_augmented
+
+bert:
+  checkpoint_path: routellm/bert_gpt4_augmented
+
+causal_llm:
+  checkpoint_path: routellm/causal_llm_gpt4_augmented
+  score_threshold: 4
+  special_tokens: ["[[1]]", "[[2]]", "[[3]]", "[[4]]", "[[5]]"]
+  num_outputs: 5
+  model_type: causal
+  model_id: meta-llama/Meta-Llama-3-8B
+  flash_attention_2: false
+
+# Baseline routing thresholds. The command-line --threshold overrides these.
+thresholds:
+  mf: 0.11593
+  bert: 0.75
+  causal_llm: 0.11593

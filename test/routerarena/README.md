@@ -49,3 +49,24 @@ python test/routerarena/routerarena_e2e_benchmark.py \
 - 鲁棒性：对比 full 与 robustness 重叠样本的模型选择翻转率/稳定性
 
 说明：LiveCodeBench 数据会纳入评测流程，但如果缺少代码执行依赖，其精确代码执行分数会标记为 unsupported。
+
+## RouteLLM baseline
+
+RouteLLM baseline 使用完全相同的 RouterArena 数据集、split 排布、zero-shot prompt 和评分函数。当前配置包含 `mf`、`bert` 和 `causal_llm` 三种路由器。路由器在进程内执行，因此 detail 文件会额外记录 `route_decision`、`router_score`、`threshold` 和 `routing_latency_ms`；最终回答仍记录 `selected_model`、`task_score` 和 `status`。
+
+默认实际后端模型与 `src/vllm-sr/config.yaml` 一致：strong 为 `Qwen/Qwen3.5-27B`，weak 为 `Qwen/Qwen3.5-4B`。RouteLLM MF checkpoint 的训练模型 ID 通过 `--route-strong-model`/`--route-weak-model` 单独配置，避免与实际推理模型混淆。
+
+```bash
+cd /home/chengsixiang/semantic-router
+PYTHONPATH=/home/chengsixiang/RouteLLM:$PYTHONPATH \
+  python test/routerarena/routellm_e2e_benchmark.py \
+  --splits full robustness \
+  --backend-url http://10.156.186.8:18081/v1 \
+  --embedding-base-url https://api.openai.com/v1 \
+  --embedding-api-key "$OPENAI_API_KEY" \
+  --max-samples 100
+```
+
+输出写入 `reports/routerarena-e2e/routellm/`，包含每个 split 的 JSONL detail、`latest_*_detail.jsonl`、带时间戳 summary 和 `latest_summary.json`。
+
+切换路由器时使用 `--router bert` 或 `--router causal_llm`；对应 checkpoint 已在 `routellm_baseline.yaml` 中配置。
