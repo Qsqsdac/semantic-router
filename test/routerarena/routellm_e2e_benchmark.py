@@ -63,6 +63,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--strong-model", default=DEFAULT_STRONG_MODEL)
     parser.add_argument("--weak-model", default=DEFAULT_WEAK_MODEL)
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
+    parser.add_argument(
+        "--checkpoint-interval",
+        type=int,
+        default=100,
+        help="Write partial detail and summary files after this many samples; use 0 to disable.",
+    )
+    parser.add_argument(
+        "--max-consecutive-errors",
+        type=int,
+        default=10,
+        help="Stop after this many consecutive failed backend requests; use 0 to disable.",
+    )
     return parser.parse_args()
 
 
@@ -197,6 +209,33 @@ def evaluate_one(
     return result
 
 
+def write_split_checkpoint(
+    output_dir: Path,
+    split: str,
+    run_id: str,
+    rows: List[Dict[str, Any]],
+    args: argparse.Namespace,
+    partial: bool,
+) -> Dict[str, Any]:
+    suffix = "_partial" if partial else ""
+    detail_file = output_dir / f"routellm_e2e_{split}_detail_{run_id}{suffix}.jsonl"
+    latest_detail_file = output_dir / f"latest_{split}_detail.jsonl"
+    base.write_jsonl(detail_file, rows)
+    base.write_jsonl(latest_detail_file, rows)
+    summary = base.summarize_rows(rows)
+    summary.update({
+        "run_id": run_id,
+        "split": split,
+        "detail_file": str(detail_file),
+        "router": args.router,
+        "threshold": args.threshold,
+        "strong_model": args.strong_model,
+        "weak_model": args.weak_model,
+        "is_partial": partial,
+    })
+    return summary
+
+
 def main() -> None:
     args = parse_args()
     controller = load_routellm(args)
@@ -213,26 +252,29 @@ def main() -> None:
 
     for split in args.splits:
         rows: List[Dict[str, Any]] = []
-        for index, sample in enumerate(split_samples.get(split, []), start=1):
-            rows.append(evaluate_one(index, sample, args, controller))
-            if index % 100 == 0:
-                print(f"[progress] {split}: {index}/{len(split_samples[split])}")
+        consecutive_errors = 0
+        try:
+            for index, sample in enumerate(split_samples.get(split, []), start=1):
+                result = evaluate_one(index, sample, args, controller)
+                rows.append(result)
+                consecutive_errors = consecutive_errors + 1 if result["status"] == "error" else 0
+                if args.checkpoint_interval and index % args.checkpoint_interval == 0:
+                    write_split_checkpoint(output_dir, split, run_id, rows, args, partial=True)
+                    print(f"[checkpoint] {split}: {index}/{len(split_samples[split])}")
+                if args.max_consecutive_errors and consecutive_errors >= args.max_consecutive_errors:
+                    print(f"[stop] {split}: {consecutive_errors} consecutive errors")
+                    break
+        except KeyboardInterrupt:
+            print(f"[interrupt] Saving {len(rows)} completed {split} samples")
+        summary = write_split_checkpoint(
+            output_dir,
+            split,
+            run_id,
+            rows,
+            args,
+            partial=len(rows) < len(split_samples.get(split, [])),
+        )
         split_rows[split] = rows
-        detail_file = output_dir / f"routellm_e2e_{split}_detail_{run_id}.jsonl"
-        latest_detail_file = output_dir / f"latest_{split}_detail.jsonl"
-        base.write_jsonl(detail_file, rows)
-        base.write_jsonl(latest_detail_file, rows)
-        summary = base.summarize_rows(rows)
-        summary.update({
-            "run_id": run_id,
-            "split": split,
-            "detail_file": str(detail_file),
-            "router": args.router,
-            "threshold": args.threshold,
-            "strong_model": args.strong_model,
-            "weak_model": args.weak_model,
-            "sample_results": rows,
-        })
         split_summaries[split] = summary
 
     robustness = {}
