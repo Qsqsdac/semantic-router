@@ -35,6 +35,20 @@ def test_router_rewritten_chat_path_is_supported():
     assert "/v1/chat/completions" in replay.CHAT_COMPLETION_PATHS
 
 
+def test_qwen35_models_use_their_configured_upstreams(monkeypatch):
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "aliyun-key")
+    monkeypatch.setenv("REPLAY_QWEN35_4B_UPSTREAM_BASE_URL", "http://local.test:18080/v1")
+    default = replay.Upstream("https://siliconflow.test/v1", "siliconflow-key")
+
+    large = replay.select_upstream({"model": "Qwen/Qwen3.5-27B"}, default)
+    small = replay.select_upstream({"model": "qwen3.5-4b"}, default)
+    fallback = replay.select_upstream({"model": "other-model"}, default)
+
+    assert large == replay.Upstream(replay.QWEN35_27B_ALIYUN_BASE_URL, "aliyun-key")
+    assert small == replay.Upstream("http://local.test:18080/v1")
+    assert fallback == default
+
+
 def test_upstream_session_ignores_environment_proxy_settings(monkeypatch):
     for name in (
         "HTTP_PROXY",

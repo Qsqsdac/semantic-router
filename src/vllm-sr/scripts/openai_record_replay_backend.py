@@ -13,7 +13,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import requests
 
@@ -21,6 +21,30 @@ import requests
 LOGGER = logging.getLogger("openai-record-replay")
 WRITE_LOCK = threading.Lock()
 CHAT_COMPLETION_PATHS = {"/chat/completions", "/v1/chat/completions"}
+QWEN35_27B_ALIYUN_BASE_URL = "https://llm-wdv7cxpofjhrv642.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+QWEN35_4B_LOCAL_BASE_URL = "http://127.0.0.1:18080/v1"
+
+
+class Upstream(NamedTuple):
+    base_url: str
+    api_key: str = ""
+
+
+def normalized_model_name(payload: dict[str, Any]) -> str:
+    model = str(payload.get("model", "")).strip().lower()
+    return model.removeprefix("qwen/")
+
+
+def select_upstream(payload: dict[str, Any], default_upstream: Upstream) -> Upstream:
+    model = normalized_model_name(payload)
+    if model == "qwen3.5-27b":
+        return Upstream(
+            os.getenv("REPLAY_QWEN35_27B_UPSTREAM_BASE_URL", QWEN35_27B_ALIYUN_BASE_URL),
+            os.getenv("REPLAY_QWEN35_27B_UPSTREAM_API_KEY", os.getenv("DASHSCOPE_API_KEY", "")),
+        )
+    if model == "qwen3.5-4b":
+        return Upstream(os.getenv("REPLAY_QWEN35_4B_UPSTREAM_BASE_URL", QWEN35_4B_LOCAL_BASE_URL))
+    return default_upstream
 
 
 def canonical_request(payload: dict[str, Any]) -> bytes:
@@ -153,15 +177,16 @@ class ReplayHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _forward(self, payload: dict[str, Any]) -> tuple[requests.Response, float]:
-        if not self.server.upstream_base:
+        upstream = select_upstream(payload, self.server.default_upstream)
+        if not upstream.base_url:
             raise RuntimeError("REPLAY_UPSTREAM_BASE_URL is required for record or auto cache misses")
         headers = {"Content-Type": "application/json"}
-        if self.server.upstream_api_key:
-            headers["Authorization"] = f"Bearer {self.server.upstream_api_key}"
+        if upstream.api_key:
+            headers["Authorization"] = f"Bearer {upstream.api_key}"
         started = time.perf_counter()
         with new_upstream_session() as session:
             response = session.post(
-                f"{self.server.upstream_base}/chat/completions",
+                f"{upstream.base_url.rstrip('/')}/chat/completions",
                 headers=headers,
                 json=payload,
                 timeout=self.server.upstream_timeout,
@@ -225,8 +250,7 @@ class ReplayHTTPServer(ThreadingHTTPServer):
         super().__init__(address, ReplayHandler)
         self.store = store
         self.mode = mode
-        self.upstream_base = upstream_base.rstrip("/")
-        self.upstream_api_key = upstream_api_key
+        self.default_upstream = Upstream(upstream_base.rstrip("/"), upstream_api_key)
         self.upstream_timeout = upstream_timeout
         self.proxies = {"http": upstream_proxy, "https": upstream_proxy} if upstream_proxy else None
 

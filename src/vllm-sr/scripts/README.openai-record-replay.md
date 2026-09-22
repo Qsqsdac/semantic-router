@@ -49,27 +49,41 @@ curl http://127.0.0.1:18081/healthz
 tmux kill-session -t openai-replay
 ```
 
+通过下文的受控启动器启动时，销毁 `openai-replay` 会话会同时停止本机 Qwen3.5-4B 进程并释放显存。
+
 ## 启动命令
 
-在仓库根目录执行以下命令。请求可能缓存未命中时（`auto` 或 `record` 模式），必须设置上游 URL 和 API 密钥。
+在仓库根目录执行以下命令。请求可能缓存未命中时（`auto` 或 `record` 模式），未匹配专用模型规则的请求必须设置默认上游 URL 和 API 密钥。此启动器会先启动本机 Qwen3.5-4B，确认健康后再启动 replay；replay 退出、被终止或收到挂起信号时会连带停止或挂起 4B 服务。
 
 ```bash
 cd /home/chengsixiang/semantic-router
 
 tmux new-session -d -s openai-replay \
-  'REPLAY_HOST=0.0.0.0 \
+  'REPLAY_PYTHON=/home/chengsixiang/.venv/bin/python \
+   QWEN35_4B_PYTHON=/home/chengsixiang/RouteLLM/.venv/bin/python \
+   QWEN35_4B_SERVICE_DIR=/home/chengsixiang/qwen35-4b-service \
+   REPLAY_HOST=0.0.0.0 \
    REPLAY_PORT=18081 \
    REPLAY_CACHE_DIR=/home/chengsixiang/semantic-router/.cache/openai-replay \
    REPLAY_MODE=auto \
    REPLAY_UPSTREAM_BASE_URL=https://<upstream-host>/v1 \
    REPLAY_UPSTREAM_API_KEY=<api-key> \
    REPLAY_UPSTREAM_TIMEOUT_SECONDS=600 \
-   /home/chengsixiang/.venv/bin/python \
-     src/vllm-sr/scripts/openai_record_replay_backend.py \
+   src/vllm-sr/scripts/start_openai_replay_with_local_qwen4b.sh \
+     --mode auto \
      2>&1 | tee -a /tmp/openai-replay.log'
 ```
 
 不要在提交到仓库的脚本中写入凭据。交互式启动时，应在创建 tmux 会话前先在 Shell 中导出 `REPLAY_UPSTREAM_API_KEY`。
+
+缓存未命中时，Qwen3.5 模型会使用专用上游：
+
+| 模型 | 默认上游 | 密钥来源 |
+| --- | --- | --- |
+| `Qwen/Qwen3.5-27B` 或 `qwen3.5-27b` | 阿里云百炼 OpenAI 兼容接口 | `DASHSCOPE_API_KEY` |
+| `Qwen/Qwen3.5-4B` 或 `qwen3.5-4b` | `http://127.0.0.1:18080/v1` | 无 |
+
+两条规则都可通过环境变量覆盖：`REPLAY_QWEN35_27B_UPSTREAM_BASE_URL`、`REPLAY_QWEN35_27B_UPSTREAM_API_KEY` 和 `REPLAY_QWEN35_4B_UPSTREAM_BASE_URL`。其他模型仍使用 `REPLAY_UPSTREAM_BASE_URL` 与 `REPLAY_UPSTREAM_API_KEY`。
 
 ## 模式
 
@@ -114,6 +128,14 @@ CLI 参数：
 | --- | --- | --- |
 | `REPLAY_UPSTREAM_BASE_URL` | 空 | 上游 OpenAI 基础 URL，包含 `/v1` 后缀 |
 | `REPLAY_UPSTREAM_API_KEY` | 空 | 以 `Authorization: Bearer <key>` 发送给上游 |
+| `REPLAY_QWEN35_27B_UPSTREAM_BASE_URL` | 阿里云百炼兼容接口 | Qwen3.5-27B 专用 OpenAI 基础 URL |
+| `REPLAY_QWEN35_27B_UPSTREAM_API_KEY` | `DASHSCOPE_API_KEY` | Qwen3.5-27B 专用 API 密钥 |
+| `REPLAY_QWEN35_4B_UPSTREAM_BASE_URL` | `http://127.0.0.1:18080/v1` | Qwen3.5-4B 本机服务基础 URL |
+| `REPLAY_PYTHON` | 无 | 运行 replay 服务的 Python 解释器；受控启动器必填 |
+| `QWEN35_4B_PYTHON` | 无 | 运行本机 Qwen3.5-4B 服务的 Python 解释器；受控启动器必填 |
+| `QWEN35_4B_SERVICE_DIR` | 无 | 本机 `qwen35-4b-service` 目录；受控启动器必填 |
+| `QWEN35_4B_HOST` / `QWEN35_4B_PORT` | `127.0.0.1` / `18080` | 本机 Qwen3.5-4B 服务监听地址 |
+| `QWEN35_4B_STARTUP_TIMEOUT_SECONDS` | `180` | 等待本机 Qwen3.5-4B 健康检查的秒数 |
 | `REPLAY_UPSTREAM_TIMEOUT_SECONDS` | `600` | 上游 HTTP 超时时间，单位为秒 |
 | `REPLAY_UPSTREAM_PROXY` | 空 | 可选代理 URL；默认会忽略代理环境变量。 |
 
