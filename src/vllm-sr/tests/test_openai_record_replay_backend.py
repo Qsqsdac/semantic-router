@@ -49,6 +49,16 @@ def test_qwen35_models_use_their_configured_upstreams(monkeypatch):
     assert fallback == default
 
 
+def test_qwen35_27b_uses_aliyun_model_id_without_changing_cache_payload():
+    payload = {"model": "Qwen/Qwen3.5-27B", "messages": [{"role": "user", "content": "hello"}]}
+
+    upstream_payload = replay.upstream_request_payload(payload)
+
+    assert upstream_payload["model"] == "qwen3.5-27b"
+    assert payload["model"] == "Qwen/Qwen3.5-27B"
+    assert replay.cache_key(payload) != replay.cache_key(upstream_payload)
+
+
 def test_upstream_session_ignores_environment_proxy_settings(monkeypatch):
     for name in (
         "HTTP_PROXY",

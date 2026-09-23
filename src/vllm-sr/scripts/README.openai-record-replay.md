@@ -2,7 +2,7 @@
 
 `openai_record_replay_backend.py` 是用于可重复路由实验的 OpenAI 兼容 HTTP 后端。它接收聊天补全请求；当完整请求与已存储记录匹配时回放响应；缓存未命中时可将请求转发给真实的 OpenAI 兼容上游。
 
-缓存键是规范化请求 JSON 的 SHA-256 哈希，包含路由器选定的物理 `model`、消息及其他所有影响生成结果的请求字段。因此，路由决策变更会有意导致缓存未命中。
+缓存键是规范化请求 JSON 的 SHA-256 哈希，包含路由器选定的物理 `model`、消息及其他所有影响生成结果的请求字段。因此，路由决策变更会有意导致缓存未命中。若物理模型 ID 与上游供应商的 ID 不同，服务仅在转发时改写模型名，缓存键仍使用原始物理模型 ID。
 
 ## 接口
 
@@ -13,7 +13,7 @@
 | `GET /healthz` | 存活检查，返回当前缓存模式 |
 | `GET /v1/models` | 最小化的 OpenAI models 响应 |
 
-响应包含 `X-OpenAI-Replay` 头，其值为 `HIT` 或 `MISS; id=<cache-key>`。回放响应在保存了原始请求耗时时还会包含 `X-OpenAI-Replay-Original-Elapsed-Ms`。
+响应包含 `X-OpenAI-Replay` 头，其值为 `HIT`、`MISS; id=<cache-key>` 或 `BYPASS; upstream_status=<status>`。仅成功的上游响应会写入缓存；非成功响应以 `BYPASS` 透传且不会被缓存。回放响应在保存了原始请求耗时时还会包含 `X-OpenAI-Replay-Original-Elapsed-Ms`。
 
 ## 当前运行的服务
 
@@ -76,11 +76,13 @@ tmux new-session -d -s openai-replay \
 
 不要在提交到仓库的脚本中写入凭据。交互式启动时，应在创建 tmux 会话前先在 Shell 中导出 `REPLAY_UPSTREAM_API_KEY`。
 
+若 `DASHSCOPE_API_KEY` 仅定义在 `~/.bashrc`，请在创建 tmux 会话前将它导出到当前 Shell；`tmux new-session '...'` 使用的非交互 shell 不会读取 `~/.bashrc`，但会继承创建会话时已有的环境变量。不要为此盲目加载完整的 `~/.bashrc`，因为它可能包含其他交互式初始化操作；只导出所需变量后再执行启动命令。
+
 缓存未命中时，Qwen3.5 模型会使用专用上游：
 
 | 模型 | 默认上游 | 密钥来源 |
 | --- | --- | --- |
-| `Qwen/Qwen3.5-27B` 或 `qwen3.5-27b` | 阿里云百炼 OpenAI 兼容接口 | `DASHSCOPE_API_KEY` |
+| `Qwen/Qwen3.5-27B` 或 `qwen3.5-27b` | 阿里云百炼 OpenAI 兼容接口；出站模型 ID 固定为 `qwen3.5-27b` | `DASHSCOPE_API_KEY` |
 | `Qwen/Qwen3.5-4B` 或 `qwen3.5-4b` | `http://127.0.0.1:18080/v1` | 无 |
 
 两条规则都可通过环境变量覆盖：`REPLAY_QWEN35_27B_UPSTREAM_BASE_URL`、`REPLAY_QWEN35_27B_UPSTREAM_API_KEY` 和 `REPLAY_QWEN35_4B_UPSTREAM_BASE_URL`。其他模型仍使用 `REPLAY_UPSTREAM_BASE_URL` 与 `REPLAY_UPSTREAM_API_KEY`。

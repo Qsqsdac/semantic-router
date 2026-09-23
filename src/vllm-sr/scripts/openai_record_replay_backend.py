@@ -23,6 +23,7 @@ WRITE_LOCK = threading.Lock()
 CHAT_COMPLETION_PATHS = {"/chat/completions", "/v1/chat/completions"}
 QWEN35_27B_ALIYUN_BASE_URL = "https://llm-wdv7cxpofjhrv642.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 QWEN35_4B_LOCAL_BASE_URL = "http://127.0.0.1:18080/v1"
+QWEN35_27B_ALIYUN_MODEL_ID = "qwen3.5-27b"
 
 
 class Upstream(NamedTuple):
@@ -37,7 +38,7 @@ def normalized_model_name(payload: dict[str, Any]) -> str:
 
 def select_upstream(payload: dict[str, Any], default_upstream: Upstream) -> Upstream:
     model = normalized_model_name(payload)
-    if model == "qwen3.5-27b":
+    if model == QWEN35_27B_ALIYUN_MODEL_ID:
         return Upstream(
             os.getenv("REPLAY_QWEN35_27B_UPSTREAM_BASE_URL", QWEN35_27B_ALIYUN_BASE_URL),
             os.getenv("REPLAY_QWEN35_27B_UPSTREAM_API_KEY", os.getenv("DASHSCOPE_API_KEY", "")),
@@ -45,6 +46,13 @@ def select_upstream(payload: dict[str, Any], default_upstream: Upstream) -> Upst
     if model == "qwen3.5-4b":
         return Upstream(os.getenv("REPLAY_QWEN35_4B_UPSTREAM_BASE_URL", QWEN35_4B_LOCAL_BASE_URL))
     return default_upstream
+
+
+def upstream_request_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a provider-compatible payload without changing the cache key payload."""
+    if normalized_model_name(payload) != QWEN35_27B_ALIYUN_MODEL_ID:
+        return payload
+    return {**payload, "model": QWEN35_27B_ALIYUN_MODEL_ID}
 
 
 def canonical_request(payload: dict[str, Any]) -> bytes:
@@ -188,7 +196,7 @@ class ReplayHandler(BaseHTTPRequestHandler):
             response = session.post(
                 f"{upstream.base_url.rstrip('/')}/chat/completions",
                 headers=headers,
-                json=payload,
+                json=upstream_request_payload(payload),
                 timeout=self.server.upstream_timeout,
                 proxies=self.server.proxies,
             )
@@ -224,8 +232,11 @@ class ReplayHandler(BaseHTTPRequestHandler):
 
             response, elapsed_ms = self._forward(payload)
             record = response_record(response, elapsed_ms)
-            record_id = self.server.store.put(payload, record)
-            self._write_record(record, f"MISS; id={record_id}")
+            if 200 <= response.status_code < 300:
+                record_id = self.server.store.put(payload, record)
+                self._write_record(record, f"MISS; id={record_id}")
+            else:
+                self._write_record(record, f"BYPASS; upstream_status={response.status_code}")
         except requests.RequestException as exc:
             LOGGER.exception("upstream request failed")
             self._write_json(502, {"error": {"message": str(exc), "type": "upstream_error"}})
