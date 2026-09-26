@@ -70,3 +70,35 @@ PYTHONPATH=/home/chengsixiang/RouteLLM:$PYTHONPATH \
 输出写入 `reports/routerarena-e2e/routellm/`，包含每个 split 的 JSONL detail、`latest_*_detail.jsonl`、带时间戳 summary 和 `latest_summary.json`。
 
 切换路由器时使用 `--router bert` 或 `--router causal_llm`；对应 checkpoint 已在 `routellm_baseline.yaml` 中配置。
+
+## M-IRT baseline
+
+M-IRT baseline 运行在独立的 OpenAI-compatible gateway 中：它固定使用
+`mirt_bert.snapshot`、`bert-base-uncased` 的固定 commit、同一 BERT 的
+mean pooling 与 L2 normalization，并从 Git LFS 取回的 `query.csv` 和
+`query_embeddings.pkl` 的训练部分建立 KNN 冷启动索引。新请求使用 5 个
+近邻 query 的平均向量按固定 `lambda` 融合；候选模型 profile 也使用同一
+BERT 编码并缓存。新候选模型不需要表现标签或重新训练 M-IRT，但这是需要
+单独报告的实验性 zero-shot 泛化假设。
+
+启动 gateway：
+
+```bash
+cd /home/chengsixiang/IRT-Router
+python mirt_service.py --config router_config.yaml
+```
+
+运行与 RouteLLM 相同的 RouterArena 数据、prompt、split 对齐和评分协议：
+
+```bash
+cd /home/chengsixiang/semantic-router
+python test/routerarena/mirt_e2e_benchmark.py \
+  --router-url http://127.0.0.1:8088 \
+  --splits full robustness \
+  --max-samples 100
+```
+
+`a`、`lambda`、价格快照、候选集合和 profile 文本均在 gateway 的
+`router_config.yaml` 中固定，不作为客户端参数。gateway 记录 request ID、
+候选集版本、预测概率、utility、估算成本、实际成本、延迟和失败原因；
+这些记录不反哺训练。
